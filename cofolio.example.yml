@@ -17,5 +17,7 @@ previewTimeoutMs: 120000
 previewCacheVersion: '1'
 # Default home: <project>/.cofolio/dsh-home; cache remains <home>/preview-cache.
 # home: /srv/cofolio/data
+# Optional default workspace for new sessions (must already exist):
+# workspace: /srv/cofolio-workspace
 maxUploadBytes: 1073741824
 maxPreviewBytes: 104857600

@@ -24,6 +24,6 @@ const patchPath = path.join(home, 'cofolio.cordis.patch.yml');
 await writeFile(patchPath, yaml.dump(patch), { mode: 0o600 });
 const cli = path.join(root, 'node_modules/@deepseek-ai/dsh/lib/bin.js');
 const initialize = existsSync(path.join(home, 'profiles/cofolio/package.json')) ? [] : ['--from-default-profile', 'web'];
-const child = spawn(process.execPath, [cli, '--profile', 'cofolio', ...initialize, '--patch', patchPath, '--no-open', ...process.argv.slice(2)], { cwd: root, env: { ...process.env, DSH_HOME: home }, stdio: 'inherit', windowsHide: true });
+const child = spawn(process.execPath, [cli, '--profile', 'cofolio', ...initialize, '--patch', patchPath, '--no-open', ...process.argv.slice(2)], { cwd: path.resolve(config.workspace || root), env: { ...process.env, DSH_HOME: home }, stdio: 'inherit', windowsHide: true });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal));
 child.once('exit', code => { process.exitCode = code ?? 1; });

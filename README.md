@@ -27,15 +27,16 @@ Office 阅读链路：**PPT/PPTX、DOC/DOCX → ONLYOFFICE Document Builder → 
 
 ### 安装转换器
 
-从 [ONLYOFFICE Document Builder 官方下载页](https://www.onlyoffice.com/download-builder.aspx) 获取适合服务器架构的 Linux 安装包。Ubuntu/Debian 安装下载的包，例如：
+使用 [ONLYOFFICE Document Builder 官方 v9.4.0 发布包](https://github.com/ONLYOFFICE/DocumentBuilder/releases/tag/v9.4.0)。以下为已验证的 Ubuntu 24.04 x86_64 安装方式；ARM 服务器应选择对应的 aarch64 包：
 
 ```bash
-sudo apt install ./onlyoffice-documentbuilder*.deb
-sudo apt install fonts-noto-cjk fonts-liberation
+curl -fLO https://github.com/ONLYOFFICE/DocumentBuilder/releases/download/v9.4.0/onlyoffice-documentbuilder-linux-x86_64.tar.xz
+sudo apt install libxml2 libcurl4t64 libcurl3t64-gnutls fonts-noto-cjk fonts-liberation fonts-dejavu-core fonts-opensymbol fontconfig
+sudo tar -xf onlyoffice-documentbuilder-linux-x86_64.tar.xz -C /
 sudo fc-cache -f
 ```
 
-找到实际的 `docbuilder` 路径并填入配置；常见位置为 `/opt/onlyoffice/documentbuilder/docbuilder`。无需安装 LibreOffice、Python UNO，也无需启动 ONLYOFFICE Docs 编辑服务。
+此发布包将转换器安装到 `/opt/onlyoffice/documentbuilder/docbuilder`。无需安装 LibreOffice、Python UNO，也无需启动 ONLYOFFICE Docs 编辑服务。旧下载页面的 DEB 包可能仍是 8.2，部署时应核对实际版本。
 
 字体会影响布局与 Word 分页。服务器应安装文档使用的字体或合适替代字体；中文文档至少安装 CJK 字体，自备字体需有使用许可。
 
@@ -80,6 +81,8 @@ sudo journalctl -u cofolio -f
 将 [deploy/nginx.conf.example](deploy/nginx.conf.example) 放入已有 HTTPS `server` 块，并配置域名与证书。模板包含 WebSocket、长连接和上传大小设置。不要同时暴露另一套没有认证的 dsh 服务。
 
 `COFOLIO_CONFIG=/absolute/path/config.yml` 可指定外部配置。路径字段建议使用绝对路径。
+
+迁移已有 dsh 时将 `home` 指向原有 `DSH_HOME`，保留会话与模型配置；设置 `workspace` 可指定新会话的默认项目目录。先备份原服务和数据，再停用旧服务，避免两套实例同时写入同一个 home。小内存服务器建议配置 swap，并保持 `previewWorkers: 1`。
 
 ## 可选：Docker 按需转换
 
@@ -146,7 +149,7 @@ COFOLIO_TEST_ONLYOFFICE=native COFOLIO_TEST_BUILDER=/path/to/docbuilder node --t
 
 `tests/fixtures` 包含人工生成的两页 Word/PPT。测试覆盖认证、文件边界、上传/ZIP/删除、终端输入、注释、转换排队与超时、缓存和 Range；真实转换测试用 PDF.js 核对页数与文字。
 
-浏览器集成已在 Windows + Docker Linux 转换器验证：PPTX/DOCX/PDF 阅读、选区注释、路径与页码、缓存及 Range。Linux 原生 Builder 和 systemd 模板仍需在目标服务器验证。
+浏览器集成已在 Windows + Docker Linux 转换器验证：PPTX/DOCX/PDF 阅读、选区注释、路径与页码、缓存及 Range。另已在 Ubuntu 24.04 x86_64、Node.js 24.15.0、原生 Builder 9.4.0 上通过全部 23 项测试，包括真实 PPTX/DOCX 转换。
 
 注释提示词结构见 [docs/codex-selection-format.md](docs/codex-selection-format.md)。插件包含 dsh 0.1.6 专用适配，升级 dsh 前需要重新验证。
 
