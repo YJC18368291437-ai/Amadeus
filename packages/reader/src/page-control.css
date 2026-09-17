@@ -1,0 +1,6 @@
+.cf-page-control{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.cf-page-input{display:inline-flex;height:26px;border:1px solid var(--dsw-alias-border-l3,#dce1e8);border-radius:4px;overflow:hidden}
+.cf-page-input input{width:34px;min-width:0;padding:0 4px;border:0;background:transparent;color:inherit;font:inherit;text-align:center}
+.cf-page-arrows{display:flex;flex-direction:column;width:18px}
+.cf-page-arrows button{display:flex;flex:1;align-items:center;justify-content:center;padding:0;border:0;background:transparent;color:inherit;line-height:1}
+.cf-page-arrows button:not(:disabled):hover{background:var(--dsw-alias-interactive-bg-hover,#0001)}

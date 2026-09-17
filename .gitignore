@@ -1,0 +1,11 @@
+node_modules/
+packages/*/dist/
+.cofolio/
+.release/
+cofolio.local.yml
+test-results/
+*.log
+.env
+.env.*
+!.env.example
+playwright-report/

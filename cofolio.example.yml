@@ -1,0 +1,21 @@
+# Copy to cofolio.local.yml (gitignored), then set your own credentials.
+username: cofolio
+password: CHANGE-ME
+host: 127.0.0.1
+port: 3080
+sessionHours: 12
+# Linux: install standalone ONLYOFFICE Document Builder and set its binary path.
+onlyOfficeMode: native
+onlyOfficeBuilder: /opt/onlyoffice/documentbuilder/docbuilder
+# Optional Docker mode: runs just the builder, no editor service or exposed port.
+# onlyOfficeMode: docker
+# onlyOfficeImage: onlyoffice/documentserver@sha256:3ab6ebc7c605e5a32b7ae3ff19daed4925090245acc8100ce2230bd766c88212
+# onlyOfficeFontsDir: /srv/cofolio/fonts
+previewWorkers: 1
+previewTimeoutMs: 120000
+# Bump after upgrading native Builder or replacing fonts to invalidate old PDFs.
+previewCacheVersion: '1'
+# Default home: <project>/.cofolio/dsh-home; cache remains <home>/preview-cache.
+# home: /srv/cofolio/data
+maxUploadBytes: 1073741824
+maxPreviewBytes: 104857600

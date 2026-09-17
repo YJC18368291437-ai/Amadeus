@@ -1,0 +1,325 @@
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
+import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
+import { createAnnotationStore, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
+import styles from '../../../ui/cofolio.css';
+import themeStyles from '../../../ui/dsh-theme.css';
+import { PreviewLoading } from './loading.jsx';
+import loadingStyles from './loading.css';
+import { PageControl } from './page-control.jsx';
+import pageControlStyles from './page-control.css';
+import { scrollToPage } from './scroll-page.mjs';
+
+export const inject = ['slots', 'documentPreviews', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
+const ASSETS = '/cofolio/reader-assets/';
+GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
+function sourcePath(address) {
+  const url = new URL(address);
+  const parts = url.pathname.split('/');
+  if (parts[1] !== 'session') throw new Error('Unsupported file address');
+  return parts.slice(3).map(decodeURIComponent).join('/');
+}
+function PdfPage({ pdf, number, scale, path, format, sessionId, onRendered }) {
+  const holder = useRef(), canvas = useRef(), text = useRef();
+  const [near, setNear] = useState(false), [size, setSize] = useState({ width: 600, height: 800 }), [error, setError] = useState('');
+  useEffect(() => {
+    const observer = new IntersectionObserver(entries => setNear(entries[0].isIntersecting), { rootMargin: '900px' });
+    observer.observe(holder.current); return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!near) return;
+    let cancelled = false, renderTask, layer;
+    (async () => {
+      const page = await pdf.getPage(number);
+      if (cancelled) return;
+      const viewport = page.getViewport({ scale });
+      setSize({ width: viewport.width, height: viewport.height });
+      const ratio = Math.min(devicePixelRatio || 1, 2);
+      const target = canvas.current;
+      target.width = Math.floor(viewport.width * ratio); target.height = Math.floor(viewport.height * ratio);
+      target.style.width = viewport.width + 'px'; target.style.height = viewport.height + 'px';
+      renderTask = page.render({ canvasContext: target.getContext('2d'), viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
+      await renderTask.promise;
+      if (cancelled) return;
+      text.current.replaceChildren();
+      layer = new TextLayer({ textContentSource: await page.getTextContent(), container: text.current, viewport });
+      await layer.render();
+      if (!cancelled) onRendered?.(number);
+    })().catch(error => { if (!cancelled && error.name !== 'RenderingCancelledException') { setError(error.message); onRendered?.(number, error); } });
+    return () => { cancelled = true; renderTask?.cancel(); layer?.cancel(); };
+  }, [pdf, number, scale, near, onRendered]);
+  return <><div ref={holder} className="cf-pdf-page" style={{ ...size, '--scale-factor': scale, '--total-scale-factor': scale }} data-cf-path={path} data-cf-format={format} data-cf-page={number} data-cf-page-count={pdf.numPages} data-cf-session={sessionId}>
+    <canvas ref={canvas} /><div ref={text} className="textLayer" />{error && <p className="cf-error">{error}</p>}
+  </div><div className="cf-page-label" style={{ width: size.width }}>第 {number} 页</div></>;
+}
+function PdfPreview({ resourceAddress, sessionId, scrollportRef }) {
+  const path = sourcePath(resourceAddress), format = path.split('.').pop().toLowerCase();
+  const [pdf, setPdf] = useState(), [error, setError] = useState(''), [scale, setScale] = useState(1), [page, setPage] = useState(1);
+  const scroll = useRef();
+  const [attempt, setAttempt] = useState(0), [progress, setProgress] = useState({ phase: 'prepare' }), [firstReady, setFirstReady] = useState(false);
+  const onRendered = useCallback((number, failure) => {
+    if (number !== 1) return;
+    if (failure) setError(failure.message); else setFirstReady(true);
+  }, []);
+  useEffect(() => {
+    const abort = new AbortController(); let loading, closed = false, pollTimer, polling = true;
+    const stopPolling = () => { polling = false; clearTimeout(pollTimer); };
+    setPdf(undefined); setError(''); setProgress({ phase: 'prepare' }); setFirstReady(false); setPage(1);
+    (async () => {
+      const response = await fetch(`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`, { signal: abort.signal });
+      if (!response.ok) throw new Error((await response.json()).error);
+      const metadata = await response.json();
+      if (closed) return;
+      setProgress({ phase: format === 'pdf' ? 'download' : 'convert' });
+      if (format !== 'pdf') {
+        const poll = async () => {
+          try {
+            const response = await fetch(metadata.progressUrl, { signal: abort.signal });
+            if (!response.ok) { stopPolling(); return; }
+            const current = await response.json();
+            if (closed || !polling) return;
+            if (current.state === 'converting') setProgress({ phase: 'convert', value: current.value, maximum: current.maximum });
+            if (current.state === 'ready' || current.state === 'error') stopPolling();
+          } catch { if (abort.signal.aborted) stopPolling(); }
+          finally { if (!closed && polling) pollTimer = setTimeout(poll, 150); }
+        };
+        void poll();
+      }
+      loading = getDocument({ url: metadata.url, withCredentials: true, disableStream: true, disableAutoFetch: true, rangeChunkSize: 64 * 1024, cMapUrl: ASSETS + 'cmaps/', cMapPacked: true, standardFontDataUrl: ASSETS + 'standard_fonts/', wasmUrl: ASSETS + 'wasm/', isEvalSupported: false });
+      let parsingFinished = false;
+      loading.onProgress = ({ loaded, total }) => { if (!closed && !parsingFinished && loaded) { stopPolling(); setProgress({ phase: 'download', loaded, total }); } };
+      const document = await loading.promise;
+      if (closed) return;
+      stopPolling();
+      parsingFinished = true;
+      setProgress({ phase: 'render' });
+      const first = await document.getPage(1);
+      setScale(Math.min(1.4, Math.max(0.25, ((scroll.current?.clientWidth || 640) - 32) / first.getViewport({ scale: 1 }).width)));
+      setPdf(document);
+    })().catch(error => { stopPolling(); if (!closed) setError(error.message); });
+    return () => { closed = true; stopPolling(); abort.abort(); loading?.destroy(); };
+  }, [resourceAddress, sessionId, attempt]);
+  function go(value) {
+    const next = Math.max(1, Math.min(pdf.numPages, Number(value) || 1));
+    setPage(next); scrollToPage(scroll.current, next);
+  }
+  return <section className="cf-reader">
+    <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><button className="cf-icon" title="重新加载预览" onClick={() => setAttempt(n => n + 1)}>↻</button>{pdf && <><PageControl page={page} total={pdf.numPages} onChange={go} /><button className="cf-icon" title="缩小" onClick={() => setScale(s => Math.max(.25, s - .1))}>−</button><button className="cf-icon" title="放大" onClick={() => setScale(s => Math.min(3, s + .1))}>＋</button></>}</div>
+    {error && <p className="cf-error" role="alert">{error}</p>}
+    {!firstReady && !error && <PreviewLoading key={`${resourceAddress}:${attempt}`} {...progress} office={format !== 'pdf'} />}
+    <div className="cf-pdf-scroll" ref={element => { scroll.current = element; scrollportRef?.(element); }}>{pdf && Array.from({ length: pdf.numPages }, (_, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={pdf} number={index + 1} scale={scale} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
+  </section>;
+}
+function PagedTab({ useTabInfo, sessionId }) {
+  const { tab } = useTabInfo();
+  return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} />;
+}
+const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
+function AnnotationChip({ annotations }) {
+  const anchor = useRef(), timer = useRef();
+  const [expanded, setExpanded] = useState(false), [pinned, setPinned] = useState(false), [position, setPosition] = useState({});
+  function reveal() {
+    clearTimeout(timer.current);
+    const rect = anchor.current.getBoundingClientRect();
+    setPosition({ left: Math.max(8, Math.min(rect.left, innerWidth - 436)), ...(rect.top > 260 ? { bottom: innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) });
+    setExpanded(true);
+  }
+  function leave() { if (!pinned) timer.current = setTimeout(() => setExpanded(false), 130); }
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return <div className="cf-sent-summary"><button ref={anchor} className="cf-summary-chip cf-sent-chip" aria-label={`查看 ${annotations.length} 条已发送注释`} aria-expanded={expanded} onMouseEnter={reveal} onMouseLeave={leave} onFocus={reveal} onClick={() => { reveal(); setPinned(value => !value); }} onKeyDown={event => { if (event.key === 'Escape') { setExpanded(false); setPinned(false); } }}><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{annotations.length} 条注释</button>
+    {expanded && <div className="cf-annotation-popover cf-sent-popover" style={position} role="region" aria-label="已发送注释详情" onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}><div className="cf-annotation-list">{annotations.map((item, index) => <article key={index} className="cf-hover-note"><span className="cf-note-number">{index + 1}。</span><div className="cf-note-copy"><span className="cf-note-label">所选文本：</span><blockquote>{denseText(item.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div></div>}
+  </div>;
+}
+function SentAnnotations({ node, renderMessageImages }) {
+  const { annotations, prompt } = node.data.cofolio;
+  return <section className="cf-sent" aria-label="已发送的注释">
+    <AnnotationChip annotations={annotations} />
+    <div className="cf-sent-message">
+    <p style={{ whiteSpace: 'pre-wrap' }}>{prompt}</p>
+    {node.data.content.filter(b => b.type === 'image' && b.attachment).map((b, index) => <React.Fragment key={index}>{renderMessageImages({ images: [{ attachment: b.attachment }], align: 'end', compact: true })}</React.Fragment>)}
+    {node.data.content.filter(b => b.type === 'file' && b.attachment).map((b, index) => <span key={index}>附件：{b.attachment.name}</span>)}
+    </div>
+  </section>;
+}
+function AnnotationDock({ sessionId, store }) {
+  const items = useSyncExternalStore(store.subscribe, () => store.get(sessionId));
+  const [editing, setEditing] = useState(null), [comment, setComment] = useState('');
+  const [expanded, setExpanded] = useState(false), [pinned, setPinned] = useState(false), [position, setPosition] = useState({ left: 0, bottom: 0 });
+  const summary = useRef(), hideTimer = useRef();
+  const selected = items.find(item => item.id === editing);
+  function reveal() {
+    clearTimeout(hideTimer.current);
+    const rect = summary.current.getBoundingClientRect();
+    setPosition({ left: Math.max(8, Math.min(rect.left, innerWidth - 376)), bottom: Math.max(8, innerHeight - rect.top + 6) });
+    setExpanded(true);
+  }
+  function leave() { if (!pinned) hideTimer.current = setTimeout(() => setExpanded(false), 130); }
+  useEffect(() => () => clearTimeout(hideTimer.current), []);
+  useEffect(() => { setExpanded(false); setPinned(false); setEditing(null); }, [sessionId]);
+  useEffect(() => {
+    if (!items.length) return;
+    const slot = summary.current?.closest('[data-slot="conversation.input.overlay"]');
+    const card = slot?.parentElement?.parentElement;
+    if (!card?.querySelector('[contenteditable="true"]')) return;
+    card.setAttribute('data-cf-annotation-input', '');
+    return () => card.removeAttribute('data-cf-annotation-input');
+  }, [items.length > 0]);
+  return <><div className="cf-annotations cf-annotation-summary" aria-label="待发送注释">{items.length > 0 && <>
+    <div className="cf-summary-pill" onMouseEnter={reveal} onMouseLeave={leave}><button ref={summary} className="cf-summary-chip" aria-label={`${items.length} 条注释`} aria-expanded={expanded} onFocus={reveal} onClick={() => { reveal(); setPinned(value => !value); }} onKeyDown={event => { if (event.key === 'Escape') { setExpanded(false); setPinned(false); } }}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{items.length} 条注释</button><button className="cf-clear-notes" aria-label="清除全部注释" title="清除全部注释" onClick={() => { store.clear(sessionId); setExpanded(false); setPinned(false); }}>×</button></div>
+    {expanded && <div className="cf-annotation-popover" style={position} role="region" aria-label="全部注释" onMouseEnter={() => clearTimeout(hideTimer.current)} onMouseLeave={leave} onKeyDown={event => { if (event.key === 'Escape') { setExpanded(false); setPinned(false); } }}>
+      <div className="cf-annotation-list">{items.map((item, index) => <article key={item.id} className="cf-hover-note"><span className="cf-note-number">{index + 1}。</span><div className="cf-note-copy"><div className="cf-hover-note-title"><span>所选文本：</span><button className="cf-icon" aria-label={`编辑注释 ${index + 1}`} title="编辑" onClick={() => { setEditing(item.id); setComment(item.annotation); setExpanded(false); setPinned(false); }}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="m12.5 3.5 4 4M3 17l1-5L13.5 2.5a2.8 2.8 0 0 1 4 4L8 16Z"/></svg></button><button className="cf-icon" aria-label={`删除注释 ${index + 1}`} title="删除" onClick={() => store.remove(sessionId, item.id)}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12M8 8v6M12 8v6"/></svg></button></div><blockquote>{denseText(item.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div>
+    </div>}
+  </>}</div>
+  <Modal open={!!selected} title="编辑注释" closeLabel="关闭" onClose={() => setEditing(null)} className="cf-modal" footer={<div className="cf-modal-actions"><Button onClick={() => setEditing(null)}>取消</Button><Button variant="primary" onClick={() => { store.update(sessionId, editing, comment); setEditing(null); }}>保存</Button></div>}>{selected && <div className="cf-annotation-editor"><textarea autoFocus aria-label="修改注释的问题" value={comment} onChange={e => setComment(e.target.value)} /></div>}</Modal></>;
+}
+function SelectionPopup({ selection, onSave, onClose }) {
+  const [editing, setEditing] = useState(false), [annotation, setAnnotation] = useState(''), [error, setError] = useState('');
+  function save() {
+    try { onSave({ text: selection.text, source: selection.source, annotation }); }
+    catch (error) { setError(error.message); }
+  }
+  return <div className={`cf-selection ${editing ? 'cf-selection-editor' : 'cf-selection-prompt'}`} style={{ left: Math.max(8, Math.min(selection.x, innerWidth - (editing ? 308 : 126))), top: Math.max(8, Math.min(selection.y + 6, innerHeight - (editing ? 50 : 38))) }} role={editing ? 'dialog' : undefined} aria-label="添加到对话" onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
+    {!editing ? <button className="cf-selection-trigger" onMouseDown={e => e.preventDefault()} onClick={() => setEditing(true)}><span aria-hidden="true">＋</span> 添加到对话</button> : <><input autoFocus type="text" aria-label="针对选中文本的问题" placeholder="添加可选评论…" value={annotation} onChange={e => setAnnotation(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); save(); } }} /><button type="button" className="cf-selection-confirm" aria-label="添加注释" title="添加注释" onClick={save}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4.5 10 3.5 4 7.5-9" /></svg></button>{error && <p role="alert">{error}</p>}</>}
+  </div>;
+}
+function installSelection(ctx, store) {
+  const host = document.createElement('div'); document.body.append(host);
+  const root = createRoot(host);
+  let locked = false, skipMouseUp = false;
+  function close() { locked = false; root.render(null); }
+  function cancel() { close(); window.getSelection()?.removeAllRanges(); }
+  function outsidePointerDown(event) {
+    skipMouseUp = false;
+    if (host.contains(event.target)) { locked = true; return; }
+    if (locked) { cancel(); skipMouseUp = true; }
+  }
+  function detect(event) {
+    if (event.type === 'mouseup' && skipMouseUp) { skipMouseUp = false; return; }
+    if (host.contains(event.target)) { locked = true; return; }
+    if (locked) return;
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return close();
+    const text = selection.toString().trim();
+    if (!text) return close();
+    const range = selection.getRangeAt(0);
+    const element = selection.anchorNode?.nodeType === 1 ? selection.anchorNode : selection.anchorNode?.parentElement;
+    const endElement = selection.focusNode?.nodeType === 1 ? selection.focusNode : selection.focusNode?.parentElement;
+    if (element?.closest('textarea,input,[contenteditable="true"],.cf-annotations')) return close();
+    let source, sessionId;
+    const file = element?.closest('[data-cf-path]');
+    if (file) {
+      const end = endElement?.closest('[data-cf-path]');
+      if (!end || end.dataset.cfPath !== file.dataset.cfPath) return close();
+      sessionId = file.dataset.cfSession;
+      source = { kind: 'file', path: file.dataset.cfPath, format: file.dataset.cfFormat };
+      if (file.dataset.cfPage) {
+        source.pageStart = Math.min(Number(file.dataset.cfPage), Number(end.dataset.cfPage));
+        source.pageEnd = Math.max(Number(file.dataset.cfPage), Number(end.dataset.cfPage));
+        source.pageCount = Number(file.dataset.cfPageCount);
+      }
+    } else {
+      const message = element?.closest('[data-chat-anchor-key]');
+      if (!message || !message.contains(endElement)) return close();
+      sessionId = ctx.sessions.list.getSnapshot().current;
+      const prefix = range.cloneRange(); prefix.selectNodeContents(message); prefix.setEnd(range.startContainer, range.startOffset);
+      const offset = prefix.toString().length;
+      const messageText = message.textContent || '';
+      source = { kind: 'conversation', sessionId, messageKey: message.dataset.chatAnchorKey, messageKind: message.dataset.chatFlowKind, turn: message.dataset.chatTurn, selectionStart: offset, selectionEnd: offset + text.length, before: messageText.slice(Math.max(0, offset - 160), offset), after: messageText.slice(offset + text.length, offset + text.length + 160) };
+    }
+    if (!sessionId) return close();
+    const rect = range.getBoundingClientRect();
+    root.render(<SelectionPopup key={`${sessionId}:${text}`} selection={{ text, source, x: Math.max(8, rect.left), y: rect.bottom }} onClose={cancel} onSave={item => { store.add(sessionId, item); close(); window.getSelection()?.removeAllRanges(); }} />);
+  }
+  document.addEventListener('pointerdown', outsidePointerDown, true);
+  document.addEventListener('mouseup', detect); document.addEventListener('keyup', detect);
+  return () => { document.removeEventListener('pointerdown', outsidePointerDown, true); document.removeEventListener('mouseup', detect); document.removeEventListener('keyup', detect); root.unmount(); host.remove(); };
+}
+export function apply(ctx) {
+  const store = createAnnotationStore(sessionStorage);
+  // Claim resources before the native document owner reads bytes-complete.
+  // The native viewer remains in charge of ordinary text and code documents.
+  const pagedId = 'dsh-cofolio-paged-reader';
+  ctx.effect(() => ctx.sidebarRightTabs.register({ id: pagedId, kind: 'cofolio-paged', priority: 'extension', patterns: ['*.pdf', '*.doc', '*.docx', '*.ppt', '*.pptx'], canOpen: address => { try { return new URL(address).host === 'file' && !!sourcePath(address); } catch { return false; } }, title: address => sourcePath(address).split('/').pop() }));
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: pagedId }, PagedTab)));
+  // Persisted layouts from 0.1.0 still contain native `text` tabs for PDFs and
+  // Office files. Intercept these bodies before their full-file reader mounts.
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => {
+    let installed = false, dispose;
+    const install = () => {
+      if (installed) return;
+      const entry = ctx.slots.entries('sidebar.right.pane.tab').find(row => row.options.key === '@deepseek-ai/dsh-client-ui-sidebar-documentpreview');
+      if (!entry) return;
+      installed = true;
+      const Native = entry.component;
+      const Compatible = props => {
+        const { tab } = props.useTabInfo();
+        const paged = /\.(pdf|docx?|pptx?)$/i.test(sourcePath(tab.contentId));
+        return paged ? <PagedTab {...props} /> : <Native {...props} />;
+      };
+      // Keep this native entry's exclusive child-slot declaration and injected
+      // render helpers; a second registration cannot redeclare that child.
+      entry.component = Compatible;
+      dispose = () => { if (entry.component === Compatible) entry.component = Native; };
+    };
+    install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.pane.tab', install);
+    return () => { unsubscribe(); dispose?.(); };
+  }));
+  ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles + loadingStyles + pageControlStyles; document.head.append(style); return () => style.remove(); });
+  // Add selection provenance around native document bodies without replacing
+  // Markdown rendering, syntax highlighting, or the existing viewer choices.
+  ctx.effect(() => ctx.slots.inject('sidebar.right.tab.document', () => {
+    const wrapped = new Map();
+    const install = () => {
+      for (const entry of ctx.slots.entries('sidebar.right.tab.document')) {
+        if (wrapped.has(entry)) continue;
+        const Native = entry.component;
+        const Annotatable = props => {
+          if (props.content?.kind !== 'text') return <Native {...props} />;
+          let path;
+          try { path = sourcePath(props.resourceAddress); } catch { return <Native {...props} />; }
+          return <div className="cf-source-document" style={{ display: 'contents' }} data-cf-path={path} data-cf-format={path.split('.').pop().toLowerCase()} data-cf-session={props.sessionId}><Native {...props} /></div>;
+        };
+        entry.component = Annotatable;
+        wrapped.set(entry, { Native, Annotatable });
+      }
+    };
+    install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.tab.document', install);
+    return () => { unsubscribe(); for (const [entry, { Native, Annotatable }] of wrapped) if (entry.component === Annotatable) entry.component = Native; };
+  }));
+  ctx.effect(() => ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({ name: 'conversation.input.overlay', id: 'cofolio-annotations' }, props => <AnnotationDock {...props} store={store} />)));
+  ctx.effect(() => installSelection(ctx, store));
+  // Override presentation through the public keyed slot; keep native semantic
+  // kinds so scrolling, steering, process folding and turn navigation work.
+  ctx.effect(() => ctx.slots.inject('conversation.chat.node', () => {
+    const installed = new Set(), disposers = [];
+    function install() {
+      for (const entry of ctx.slots.entries('conversation.chat.node')) {
+        const kind = entry.options.key;
+        if (!['user', 'steering'].includes(kind) || installed.has(kind) || entry.options.registrant === 'cofolio-annotated-user') continue;
+        installed.add(kind);
+        const Native = entry.component;
+        const Wrapped = props => {
+          const node = props.node;
+          const text = node.data.content.filter(b => b.type === 'text').map(b => b.text).join('');
+          const cofolio = parseAnnotatedPrompt(text);
+          return cofolio ? <SentAnnotations {...props} node={{ ...node, data: { ...node.data, cofolio } }} /> : <Native {...props} />;
+        };
+        disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'cofolio-annotated-user' }, Wrapped));
+      }
+    }
+    install(); const unsubscribe = ctx.slots.subscribe('conversation.chat.node', install);
+    return () => { unsubscribe(); for (const dispose of disposers) dispose(); };
+  }));
+  const conversation = ctx.conversation, original = conversation.sendSession;
+  ctx.effect(() => {
+    conversation.sendSession = async function(session, text, attachments, mode, signal) {
+      const id = session.sessionId;
+      const snapshot = [...store.get(id)];
+      const result = await original.call(this, session, serializeAnnotations(snapshot, text), attachments, mode, signal);
+      if (result.kind === 'success') store.settle(id, snapshot);
+      return result;
+    };
+    return () => { conversation.sendSession = original; };
+  });
+}

@@ -1,0 +1,21 @@
+[Unit]
+Description=CoFolio learning workspace (DeepSeek Harness)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cofolio
+Group=cofolio
+WorkingDirectory=/srv/cofolio
+Environment=NODE_ENV=production
+Environment=COFOLIO_CONFIG=/srv/cofolio/cofolio.local.yml
+ExecStart=/usr/bin/node /srv/cofolio/scripts/start.mjs
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
