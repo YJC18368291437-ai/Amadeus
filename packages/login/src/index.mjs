@@ -1,6 +1,7 @@
 import WebServer from '@deepseek-ai/dsh-host-webserver';
 import z from '@deepseek-ai/schemastery';
 import { createAuth } from './auth.mjs';
+import { injectBrowserCompatibility } from './browser-compat.mjs';
 
 // Substitution is restricted to the webserver composition row; no global dsh files change.
 export default class CoFolioWebServer extends WebServer {
@@ -17,6 +18,7 @@ export default class CoFolioWebServer extends WebServer {
     const auth = createAuth(config);
     super(ctx, config);
     this.auth = auth;
+    ctx.effect(() => this.tapIndex(injectBrowserCompatibility));
     ctx.inject(['connection'], scope => {
       const connection = scope.connection;
       const previous = {

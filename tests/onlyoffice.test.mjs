@@ -82,7 +82,9 @@ test('real ONLYOFFICE converts PPTX and DOCX with selectable text and persistent
     const task = getDocument({ data: new Uint8Array(await readFile(pdf)), useSystemFonts: true });
     const document = await task.promise;
     assert.equal(document.numPages, 2);
-    assert.match((await (await document.getPage(1)).getTextContent()).items.map(item => item.str).join(' '), /CoFolio/);
+    const text = (await (await document.getPage(1)).getTextContent()).items.map(item => item.str).join(' ');
+    assert.match(text, /CoFolio/);
+    assert.doesNotMatch(text, /unregistered\s+version|evaluation\s+only/i, 'Use a licensed Builder or the community DocumentServer converter; trial outputs are not release-ready');
     await task.destroy();
     assert.equal(await converter.convert(source), pdf);
     console.log(name, Math.round(performance.now() - start), 'ms; text layer and cache verified');

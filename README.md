@@ -23,20 +23,24 @@ Office 阅读链路：**PPT/PPTX、DOC/DOCX → ONLYOFFICE Document Builder → 
 
 ## Linux 直接部署
 
-需要 Node.js 24+、npm，以及 ONLYOFFICE Document Builder。建议以独立普通用户运行。
+需要 Node.js 24+、npm，以及 ONLYOFFICE 社区版转换组件。建议以独立普通用户运行。
 
 ### 安装转换器
 
-使用 [ONLYOFFICE Document Builder 官方 v9.4.0 发布包](https://github.com/ONLYOFFICE/DocumentBuilder/releases/tag/v9.4.0)。以下为已验证的 Ubuntu 24.04 x86_64 安装方式；ARM 服务器应选择对应的 aarch64 包：
+使用 [ONLYOFFICE DocumentServer Community v9.4.0 官方发布包](https://github.com/ONLYOFFICE/DocumentServer/releases/tag/v9.4.0) 内的转换 CLI。以下为已验证的 Ubuntu 24.04 x86_64 安装方式。**只解包，不安装 DocumentServer 服务，不使用 Docker。**
 
 ```bash
-curl -fLO https://github.com/ONLYOFFICE/DocumentBuilder/releases/download/v9.4.0/onlyoffice-documentbuilder-linux-x86_64.tar.xz
+curl -fLO https://github.com/ONLYOFFICE/DocumentServer/releases/download/v9.4.0/onlyoffice-documentserver_amd64.deb
+echo '0860e68c4fecf429b4e13602a4a5ec6945e6ec9f0e9af9867ef0171845aa07df  onlyoffice-documentserver_amd64.deb' | sha256sum -c
 sudo apt install libxml2 libcurl4t64 libcurl3t64-gnutls fonts-noto-cjk fonts-liberation fonts-dejavu-core fonts-opensymbol fontconfig
-sudo tar -xf onlyoffice-documentbuilder-linux-x86_64.tar.xz -C /
+sudo mkdir -p /opt/cofolio-onlyoffice
+sudo dpkg-deb -x onlyoffice-documentserver_amd64.deb /opt/cofolio-onlyoffice
 sudo fc-cache -f
 ```
 
-此发布包将转换器安装到 `/opt/onlyoffice/documentbuilder/docbuilder`。无需安装 LibreOffice、Python UNO，也无需启动 ONLYOFFICE Docs 编辑服务。旧下载页面的 DEB 包可能仍是 8.2，部署时应核对实际版本。
+转换器路径为 `/opt/cofolio-onlyoffice/var/www/onlyoffice/documentserver/server/FileConverter/bin/docbuilder`。无需 LibreOffice、Python UNO、数据库或常驻编辑服务。解包目录约 2.1 GiB；只在转换期间运行 CLI，完成后退出。
+
+独立 Document Builder 的试用发行包会在 PDF 中加入 `Unregistered version` 水印，不能直接替换上述社区版组件；如自行使用独立 Builder，应配置有效授权。集成测试会检查输出水印、页数和文字层。
 
 字体会影响布局与 Word 分页。服务器应安装文档使用的字体或合适替代字体；中文文档至少安装 CJK 字体，自备字体需有使用许可。
 
@@ -59,7 +63,7 @@ password: 'replace-with-a-long-random-password'
 host: 127.0.0.1
 port: 3080
 onlyOfficeMode: native
-onlyOfficeBuilder: /opt/onlyoffice/documentbuilder/docbuilder
+onlyOfficeBuilder: /opt/cofolio-onlyoffice/var/www/onlyoffice/documentserver/server/FileConverter/bin/docbuilder
 previewWorkers: 1
 ```
 
@@ -101,7 +105,7 @@ previewWorkers: 1
 
 默认锁定已验证的 ONLYOFFICE 9.4.0 镜像。每次只启动其中的 `docbuilder`，任务完成后删除容器，不启动编辑器、数据库或 HTTP 服务，无需开放 8082 端口。容器禁用网络，仅挂载当前任务目录和可选字体目录。默认每个任务最多 2 GiB 内存、2 CPU、128 个进程。Linux 使用宿主服务用户的 UID/GID。
 
-此模式仍使用完整官方 Docs 镜像，磁盘占用较大（本机约 4.9 GB）；追求更小安装体积时选原生 Document Builder。转换高峰仍消耗内存，默认同时只处理一份文档。
+此模式仍使用完整官方 Docs 镜像，磁盘占用较大（本机约 4.9 GB）；无需 Docker 时使用前面的原生社区版转换组件。转换高峰仍消耗内存，默认同时只处理一份文档。
 
 ## 缓存和配置
 
@@ -125,6 +129,7 @@ previewWorkers: 1
 - PDF.js 按需渲染页面和文字层，支持 Range、ETag、页码跳转和重新加载。Word 页码按转换后的 PDF 计算，PPT 每张幻灯片一页。
 - 扫描件、图片文字不能直接选中。复杂公式、特效与字体替换可能导致显示差异。旧 DOC/PPT 可尝试读取，优先使用 DOCX/PPTX。
 - 这是单用户工作台。登录用户能修改设置、操作项目文件及使用终端，应视为可信服务器用户；不提供多租户隔离。
+- HTTP 公网 IP 页面会使用基于 `crypto.getRandomValues` 的 UUID 兼容实现，确保终端与注释可用；这不替代 HTTPS 的传输加密。
 - 文件操作限定在当前会话项目目录，拒绝目录越界和符号链接。文件夹 ZIP 包含隐藏文件。删除需确认，根目录不可删除。
 - 支持目录选择 API 的安全上下文浏览器可保留空目录，其他浏览器回退到文件夹文件选择。
 - 原生 Builder 以服务用户权限执行；Docker 模式额外限制转换网络与挂载。文档不会上传第三方转换网站。
@@ -149,7 +154,7 @@ COFOLIO_TEST_ONLYOFFICE=native COFOLIO_TEST_BUILDER=/path/to/docbuilder node --t
 
 `tests/fixtures` 包含人工生成的两页 Word/PPT。测试覆盖认证、文件边界、上传/ZIP/删除、终端输入、注释、转换排队与超时、缓存和 Range；真实转换测试用 PDF.js 核对页数与文字。
 
-浏览器集成已在 Windows + Docker Linux 转换器验证：PPTX/DOCX/PDF 阅读、选区注释、路径与页码、缓存及 Range。另已在 Ubuntu 24.04 x86_64、Node.js 24.15.0、原生 Builder 9.4.0 上通过全部 23 项测试，包括真实 PPTX/DOCX 转换。
+浏览器集成已验证 PPTX/DOCX/PDF 阅读、选区注释、路径与页码、缓存及 Range。另已在 Ubuntu 24.04 x86_64、Node.js 24.15.0、原生社区版转换器 9.4.0 上通过全部 25 项测试，包括真实 PPTX/DOCX 转换和无试用水印检查；HTTP 非安全来源的 UUID 兼容性也单独验证。
 
 注释提示词结构见 [docs/codex-selection-format.md](docs/codex-selection-format.md)。插件包含 dsh 0.1.6 专用适配，升级 dsh 前需要重新验证。
 

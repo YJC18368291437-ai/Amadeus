@@ -4,9 +4,10 @@ password: CHANGE-ME
 host: 127.0.0.1
 port: 3080
 sessionHours: 12
-# Linux: install standalone ONLYOFFICE Document Builder and set its binary path.
+# Linux: extract the community DocumentServer package without installing services.
+# Standalone trial Builder releases can watermark PDFs; see README.
 onlyOfficeMode: native
-onlyOfficeBuilder: /opt/onlyoffice/documentbuilder/docbuilder
+onlyOfficeBuilder: /opt/cofolio-onlyoffice/var/www/onlyoffice/documentserver/server/FileConverter/bin/docbuilder
 # Optional Docker mode: runs just the builder, no editor service or exposed port.
 # onlyOfficeMode: docker
 # onlyOfficeImage: onlyoffice/documentserver@sha256:3ab6ebc7c605e5a32b7ae3ff19daed4925090245acc8100ce2230bd766c88212
