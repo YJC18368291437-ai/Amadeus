@@ -23,7 +23,7 @@ import previewStyles from './preview.css';
 import { cofolioKatexCss } from './markdown-preview.jsx';
 import { RenderedPreviewTab } from './rendered-preview-tab.jsx';
 import { useCtrlWheelZoom } from './wheel-zoom.jsx';
-import { clampZoom } from './zoom.mjs';
+import { clampZoom, pinchZoomScale } from './zoom.mjs';
 import brandMark from '../assets/amadeus-brand-mark.png';
 
 export const inject = ['slots', 'documentPreviews', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
@@ -71,7 +71,7 @@ function sourcePath(address) {
 function usePdfDragPan() {
   const drag = useRef();
   const onPointerDown = useCallback(event => {
-    if (event.button !== 0 || event.target !== event.currentTarget) return;
+    if (event.pointerType !== 'mouse' || event.button !== 0 || event.target !== event.currentTarget) return;
     const element = event.currentTarget;
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop, moved: false };
     element.setPointerCapture(event.pointerId);
@@ -94,6 +94,46 @@ function usePdfDragPan() {
     drag.current = undefined;
   }, []);
   return { onPointerDown, onPointerMove, onPointerUp: stop, onPointerCancel: stop, onLostPointerCapture: stop };
+}
+function usePdfPinchZoom(elementRef, scale, onScale) {
+  const latest = useRef({ scale, onScale });
+  latest.current = { scale, onScale };
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) return;
+    let pinch;
+    const distance = touches => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+    const start = event => {
+      if (event.touches.length !== 2) return;
+      const rect = element.getBoundingClientRect();
+      const x = (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left;
+      const y = (event.touches[0].clientY + event.touches[1].clientY) / 2 - rect.top;
+      pinch = { distance: distance(event.touches), scale: latest.current.scale, x, y, left: element.scrollLeft, top: element.scrollTop };
+      event.preventDefault();
+    };
+    const move = event => {
+      if (!pinch || event.touches.length !== 2) return;
+      event.preventDefault();
+      const next = pinchZoomScale(pinch.scale, pinch.distance, distance(event.touches));
+      latest.current.onScale(next);
+      requestAnimationFrame(() => {
+        const ratio = next / pinch.scale;
+        element.scrollLeft = (pinch.left + pinch.x) * ratio - pinch.x;
+        element.scrollTop = (pinch.top + pinch.y) * ratio - pinch.y;
+      });
+    };
+    const end = event => { if (event.touches.length < 2) pinch = undefined; };
+    element.addEventListener('touchstart', start, { passive: false });
+    element.addEventListener('touchmove', move, { passive: false });
+    element.addEventListener('touchend', end);
+    element.addEventListener('touchcancel', end);
+    return () => {
+      element.removeEventListener('touchstart', start);
+      element.removeEventListener('touchmove', move);
+      element.removeEventListener('touchend', end);
+      element.removeEventListener('touchcancel', end);
+    };
+  }, [elementRef]);
 }
 function PdfPage({ pdf, number, scale, baseSize, path, format, sessionId, onRendered }) {
   const holder = useRef(), canvas = useRef(), text = useRef();
@@ -198,12 +238,14 @@ function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange }) {
     manualScale.current = true;
     setScale(current => clampZoom(current + delta, .25, 3));
   }, []);
+  const pinchZoom = useCallback(next => { manualScale.current = true; setScale(next); }, []);
   const go = useCallback(value => {
     if (!preview) return;
     const next = Math.max(1, Math.min(preview.pdf.numPages, Number(value) || 1));
     setPage(next); scrollToPage(scroll.current, next);
   }, [preview]);
   useCtrlWheelZoom(scroll, zoom);
+  usePdfPinchZoom(scroll, scale, pinchZoom);
   useEffect(() => {
     manualScale.current = false;
     const controller = new AbortController();
@@ -373,7 +415,12 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible 
       return next;
     });
   }
+  const pinchZoom = useCallback(next => {
+    setScale(next);
+    entryRef.current?.setView({ scale: next, page, scrollTop: scroll.current?.scrollTop ?? 0 });
+  }, [page]);
   useCtrlWheelZoom(scroll, zoom);
+  usePdfPinchZoom(scroll, scale, pinchZoom);
   return <section ref={root} className="cf-reader">
     <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><a className="cf-icon" href={`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
     {error && <p className="cf-error" role="alert">{error}</p>}
