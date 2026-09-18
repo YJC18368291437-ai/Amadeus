@@ -65,27 +65,6 @@ function replaceConversationHeadline(ctx) {
   const unsubscribe = ctx.slots.subscribe('main.conversation', install);
   return () => { unsubscribe(); if (entry?.component === Branded) entry.component = Native; };
 }
-function reduceConversationMinimum(ctx) {
-  let entry, Native, Compact;
-  const install = () => {
-    if (entry) return;
-    const candidate = ctx.slots.entries('root')[0];
-    if (!candidate) return;
-    entry = candidate; Native = candidate.component;
-    Compact = props => {
-      const useStore = selector => props.useStore(state => {
-        const width = state.layoutInfo.viewportWidth;
-        if (width < 1024) return selector(state);
-        return selector({ ...state, layoutInfo: { ...state.layoutInfo, viewportWidth: width + 80 } });
-      });
-      return <Native {...props} useStore={useStore} />;
-    };
-    candidate.component = Compact;
-  };
-  install();
-  const unsubscribe = ctx.slots.subscribe('root', install);
-  return () => { unsubscribe(); if (entry?.component === Compact) entry.component = Native; };
-}
 function delayQueueDock(ctx) {
   let entry, Native, Delayed;
   const install = () => {
@@ -525,7 +504,7 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
   });
   const envelope = useMemo(() => annotationEnvelope(sourceNode), [sourceNode]);
   const annotations = envelope?.annotations ?? [];
-  const linkedNode = useMemo(() => annotations.length === 0 ? props.node : { ...props.node, data: { ...props.node.data, blocks: props.node.data.blocks.map(block => block.kind === 'text' ? { ...block, text: linkAnnotationReferences(block.text) } : block) } }, [annotations.length, props.node]);
+  const linkedNode = useMemo(() => annotations.length === 0 ? props.node : { ...props.node, data: { ...props.node.data, blocks: props.node.data.blocks.map(block => block.kind === 'text' ? { ...block, text: linkAnnotationReferences(block.text, annotations.length) } : block) } }, [annotations.length, props.node]);
   const [popover, setPopover] = useState(null);
   const hideTimer = useRef();
   const reference = target => target instanceof Element ? target.closest('a[href^="#cofolio-annotation-"]') : null;
@@ -717,7 +696,6 @@ export function apply(ctx) {
   ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
   ctx.effect(() => ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark' }, AmadeusBrandMark)));
   ctx.effect(() => ctx.slots.inject('main.conversation', () => replaceConversationHeadline(ctx)));
-  ctx.effect(() => ctx.slots.inject('root', () => reduceConversationMinimum(ctx)));
   ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => delayQueueDock(ctx)));
   ctx.effect(() => ctx.slots.inject('conversation.chat.turnTail', () => suppressDesktopUnavailable(ctx)));
   ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
