@@ -14,7 +14,7 @@ test('TeX Live proxy validates requests, caches successes and preserves not-foun
     if (String(url).endsWith('/missing.sty')) return new Response('missing', { status: 301 });
     return new Response(Buffer.from('package'), { status: 200, headers: { fileid: 'article.cls', 'content-length': '7' } });
   };
-  const proxy = createTexliveProxy({ cacheDir, fetchImpl });
+  const proxy = createTexliveProxy({ cacheDir, fetchImpl, kpsewhich: null });
   const first = await proxy.fetchFile('xetex/1/article.cls');
   const second = await proxy.fetchFile('xetex/1/article.cls');
   assert.equal(first.status, 200); assert.equal(first.cached, false);
@@ -28,7 +28,7 @@ test('TeX Live proxy validates requests, caches successes and preserves not-foun
 test('TeX Live proxy rejects oversized and invalid upstream responses', async t => {
   const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'cofolio-texlive-'));
   t.after(() => rm(cacheDir, { recursive: true, force: true }));
-  await assert.rejects(createTexliveProxy({ cacheDir, maxBytes: 2, fetchImpl: async () => new Response('large', { headers: { fileid: 'x.sty' } }) }).fetchFile('xetex/1/x.sty'), error => error.status === 413);
-  await assert.rejects(createTexliveProxy({ cacheDir, fetchImpl: async () => new Response('ok') }).fetchFile('xetex/1/y.sty'), error => error.status === 502);
-  await assert.rejects(createTexliveProxy({ cacheDir, fetchImpl: async () => new Response('bad', { status: 503 }) }).fetchFile('xetex/1/z.sty'), error => error.status === 502);
+  await assert.rejects(createTexliveProxy({ cacheDir, kpsewhich: null, maxBytes: 2, fetchImpl: async () => new Response('large', { headers: { fileid: 'x.sty' } }) }).fetchFile('xetex/1/x.sty'), error => error.status === 413);
+  await assert.rejects(createTexliveProxy({ cacheDir, kpsewhich: null, fetchImpl: async () => new Response('ok') }).fetchFile('xetex/1/y.sty'), error => error.status === 502);
+  await assert.rejects(createTexliveProxy({ cacheDir, kpsewhich: null, fetchImpl: async () => new Response('bad', { status: 503 }) }).fetchFile('xetex/1/z.sty'), error => error.status === 502);
 });

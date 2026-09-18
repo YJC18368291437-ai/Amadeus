@@ -10,9 +10,9 @@ import { HttpError, json, sessionRoot, resolveWithin, routeErrors } from '../../
 export const inject = ['webServer', 'sessions'];
 export function apply(ctx, config = {}) {
   const converter = createConverter(config);
-  const texlive = createTexliveProxy({ cacheDir: config.texliveCacheDir ?? path.join(config.cacheDir ?? path.dirname(fileURLToPath(import.meta.url)), 'texlive-cache'), upstream: config.texliveUpstream });
-  ctx.effect(() => () => converter.dispose());
   const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
+  const texlive = createTexliveProxy({ cacheDir: config.texliveCacheDir ?? path.join(config.cacheDir ?? path.dirname(fileURLToPath(import.meta.url)), 'texlive-cache'), formatDir: path.join(assets, 'tex'), kpsewhich: config.kpsewhich, upstream: config.texliveUpstream });
+  ctx.effect(() => () => converter.dispose());
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/cofolio/reader-assets', handler: routeErrors(async (req, res) => {
     if (req.method !== 'GET') throw new HttpError(405, 'GET required');
     const relative = decodeURIComponent(new URL(req.url, 'http://cofolio').pathname.slice('/cofolio/reader-assets/'.length));

@@ -1,13 +1,46 @@
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { HttpError } from '../../files/src/workspace.mjs';
 
 const requestPattern = /^xetex\/(\d+)\/([A-Za-z0-9 _.-]+)$/;
+const execFileAsync = promisify(execFile);
+const kpseFormats = ['gf', 'pk', '', 'tfm', 'afm', 'base', 'bib', 'bst', 'cnf', 'db', 'fmt', 'map', 'mem', 'mf', 'mfpool', 'mft', 'mp', 'mppool', '', 'ocp', 'ofm', 'opl', 'otp', 'ovf', 'ovp', 'pict', 'tex', 'texdoc', 'texpool', 'texsource', 'tex ps header', 'troff fonts', 'type1 fonts', 'vf', 'dvips config', 'ist', 'truetype fonts', 'type42 fonts', 'web2c files', 'other text files', 'other binary files', 'misc fonts', 'web', 'cweb', 'enc files', 'cmap files', 'sfd', 'opentype fonts', 'pdftex config', 'lig files', 'texmfscripts', 'lua', 'fea', 'cid maps', 'mlbib', 'mlbst', 'clua', 'ris', 'bltxml'];
 
-export function createTexliveProxy({ cacheDir, upstream = 'https://texlive.swiftlatex.com/', fetchImpl = fetch, timeoutMs = 30000, maxBytes = 32 * 1024 ** 2 } = {}) {
+export function createTexliveProxy({ cacheDir, formatDir, kpsewhich = 'kpsewhich', upstream = 'https://texlive.swiftlatex.com/', fetchImpl = fetch, timeoutMs = 30000, maxBytes = 32 * 1024 ** 2 } = {}) {
   if (!cacheDir) throw new Error('A TeX Live cache directory is required');
   const pending = new Map();
+  async function localFile(format, filename) {
+    if (formatDir && ['swiftlatexxetex.fmt', 'xetexfontlist.txt'].includes(filename)) {
+      const target = path.join(formatDir, filename);
+      const bytes = await readFile(target).catch(() => null);
+      if (bytes) return { bytes, fileid: filename };
+    }
+    const formatName = kpseFormats[format];
+    if (!formatName || !kpsewhich) return null;
+    try {
+      const { stdout } = await execFileAsync(kpsewhich, [`--format=${formatName}`, filename], { timeout: timeoutMs, windowsHide: true, maxBuffer: 1024 * 1024 });
+      const target = stdout.trim().split(/\r?\n/, 1)[0];
+      if (!target) return null;
+      const bytes = await readFile(target);
+      if (bytes.length > maxBytes) throw new HttpError(413, 'TeX Live file exceeds the size limit');
+      return { bytes, fileid: path.basename(target) };
+    } catch (error) {
+      if (error.status) throw error;
+      return null;
+    }
+  }
+  async function persist(dataPath, metaPath, bytes, fileid) {
+    await mkdir(cacheDir, { recursive: true, mode: 0o700 });
+    const suffix = randomUUID(), dataTemp = `${dataPath}.${suffix}.tmp`, metaTemp = `${metaPath}.${suffix}.tmp`;
+    try {
+      await writeFile(dataTemp, bytes, { mode: 0o600 });
+      await writeFile(metaTemp, JSON.stringify({ fileid }), { mode: 0o600 });
+      await rename(dataTemp, dataPath); await rename(metaTemp, metaPath);
+    } finally { await rm(dataTemp, { force: true }); await rm(metaTemp, { force: true }); }
+  }
   async function fetchFile(relative) {
     const match = requestPattern.exec(relative);
     if (!match) throw new HttpError(400, 'Invalid TeX Live file request');
@@ -17,6 +50,11 @@ export function createTexliveProxy({ cacheDir, upstream = 'https://texlive.swift
     if (cached[0] && cached[1]?.fileid) return { status: 200, fileid: cached[1].fileid, bytes: cached[0], cached: true };
     if (pending.has(key)) return pending.get(key);
     const job = (async () => {
+      const local = await localFile(Number(match[1]), match[2]);
+      if (local) {
+        await persist(dataPath, metaPath, local.bytes, local.fileid);
+        return { status: 200, ...local, cached: false };
+      }
       const response = await fetchImpl(new URL(relative, upstream), { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
       if (response.status === 301 || response.status === 404) return { status: 301, bytes: Buffer.from('File not found') };
       if (!response.ok) throw new HttpError(502, 'TeX Live package service failed');
@@ -26,13 +64,7 @@ export function createTexliveProxy({ cacheDir, upstream = 'https://texlive.swift
       if (bytes.length > maxBytes) throw new HttpError(413, 'TeX Live file exceeds the size limit');
       const fileid = response.headers.get('fileid');
       if (!fileid || !/^[A-Za-z0-9 _.-]+$/.test(fileid)) throw new HttpError(502, 'TeX Live package response is invalid');
-      await mkdir(cacheDir, { recursive: true, mode: 0o700 });
-      const suffix = randomUUID(), dataTemp = `${dataPath}.${suffix}.tmp`, metaTemp = `${metaPath}.${suffix}.tmp`;
-      try {
-        await writeFile(dataTemp, bytes, { mode: 0o600 });
-        await writeFile(metaTemp, JSON.stringify({ fileid }), { mode: 0o600 });
-        await rename(dataTemp, dataPath); await rename(metaTemp, metaPath);
-      } finally { await rm(dataTemp, { force: true }); await rm(metaTemp, { force: true }); }
+      await persist(dataPath, metaPath, bytes, fileid);
       return { status: 200, fileid, bytes, cached: false };
     })();
     pending.set(key, job);

@@ -39,7 +39,7 @@ class WorkerEngine {
   write(filename, source) { this.post('writefile', { url: filename, src: source }); }
   setMain(filename) { this.post('setmainfile', { url: filename }); }
   flush() { this.post('flushcache'); }
-  compile() {
+  request(command = this.command) {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => { cleanup(); reject(new Error('TeX compilation timed out')); }, this.timeoutMs);
       const onMessage = event => {
@@ -55,9 +55,10 @@ class WorkerEngine {
       };
       this.worker.addEventListener('message', onMessage);
       this.worker.addEventListener('error', onError);
-      this.post(this.command);
+      this.post(command);
     });
   }
+  compile() { return this.request(this.command); }
   close() {
     this.worker?.postMessage({ cmd: 'grace' });
     this.worker?.terminate();
@@ -66,20 +67,74 @@ class WorkerEngine {
   }
 }
 
-export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpoint = DEFAULT_TEXLIVE_ENDPOINT, timeoutMs = 120000 } = {}) {
+function formatDatabase() {
+  if (!globalThis.indexedDB) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('cofolio-tex', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('formats');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readCachedFormat(key) {
+  try {
+    const database = await formatDatabase();
+    if (!database) return null;
+    return await new Promise((resolve, reject) => {
+      const request = database.transaction('formats').objectStore('formats').get(key);
+      request.onsuccess = () => resolve(request.result ? new Uint8Array(request.result) : null);
+      request.onerror = () => reject(request.error);
+    });
+  } catch { return null; }
+}
+
+async function writeCachedFormat(key, bytes) {
+  try {
+    const database = await formatDatabase();
+    if (!database) return;
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction('formats', 'readwrite');
+      transaction.objectStore('formats').put(bytes, key);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } catch {}
+}
+
+export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpoint = DEFAULT_TEXLIVE_ENDPOINT, timeoutMs = 120000, formatCacheKey = 'cofolio-xelatex-format-v1' } = {}) {
   const xetex = new WorkerEngine({ script: `${assetBase}swiftlatexxetex.js`, command: 'compilelatex', timeoutMs });
   const dvipdfmx = new WorkerEngine({ script: `${assetBase}swiftlatexdvipdfm.js`, command: 'compilepdf', timeoutMs });
-  let chain = Promise.resolve();
+  let chain = Promise.resolve(), initializePromise, formatBytes;
+  const cache = new Map(), pending = new Map();
   async function initialize() {
-    await Promise.all([xetex.load(), dvipdfmx.load()]);
-    xetex.setEndpoint(texliveEndpoint);
-    dvipdfmx.setEndpoint(texliveEndpoint);
+    if (initializePromise) return initializePromise;
+    initializePromise = (async () => {
+      const dviReady = dvipdfmx.load().then(() => dvipdfmx.setEndpoint(texliveEndpoint));
+      await xetex.load();
+      xetex.setEndpoint(texliveEndpoint);
+      formatBytes = await readCachedFormat(formatCacheKey);
+      if (!formatBytes) {
+        const built = await xetex.request('compileformat');
+        if (built.status !== 0 || !built.bytes) throw new TexCompileError('XeTeX format generation failed', built.log, built.status);
+        formatBytes = built.bytes;
+        await writeCachedFormat(formatCacheKey, formatBytes);
+        xetex.close();
+        await xetex.load();
+        xetex.setEndpoint(texliveEndpoint);
+      }
+      await dviReady;
+    })();
+    return initializePromise;
   }
   return {
     compile(source) {
+      if (cache.has(source)) return Promise.resolve(cache.get(source));
+      if (pending.has(source)) return pending.get(source);
       const job = chain.then(async () => {
         await initialize();
         xetex.flush();
+        xetex.write('swiftlatexxetex.fmt', formatBytes);
         xetex.write('main.tex', source);
         xetex.setMain('main.tex');
         const xdv = await xetex.compile();
@@ -89,11 +144,16 @@ export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpo
         dvipdfmx.setMain('main.xdv');
         const pdf = await dvipdfmx.compile();
         if (pdf.status !== 0 || !pdf.bytes) throw new TexCompileError('PDF generation failed', pdf.log, pdf.status);
-        return { pdf: pdf.bytes, log: `${xdv.log}\n${pdf.log}`.trim() };
+        const result = { pdf: pdf.bytes, log: `${xdv.log}\n${pdf.log}`.trim() };
+        cache.set(source, result);
+        while (cache.size > 4) cache.delete(cache.keys().next().value);
+        return result;
       });
       chain = job.catch(() => {});
+      pending.set(source, job);
+      job.finally(() => pending.delete(source)).catch(() => {});
       return job;
     },
-    close() { xetex.close(); dvipdfmx.close(); },
+    close() { cache.clear(); pending.clear(); initializePromise = undefined; formatBytes = undefined; xetex.close(); dvipdfmx.close(); },
   };
 }

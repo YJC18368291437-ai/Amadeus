@@ -12,15 +12,21 @@ import pageControlStyles from './page-control.css';
 import { scrollToPage } from './scroll-page.mjs';
 import { createPreviewCache } from './preview-cache.mjs';
 import { currentPageAt, reconcileAnnotationDraft, stripAnnotationDraftMarker } from './reader-state.mjs';
+import { createDocumentStore } from './document-store.mjs';
+import { parseEditableAddress } from './file-address.mjs';
+import { editorKind } from './editor-routing.mjs';
+import { TextEditorTab } from './text-editor-tab.jsx';
+import { DownloadIcon } from './document-toolbar.jsx';
+import { createTexCompiler } from './tex-engine.mjs';
+import editorStyles from './editor.css';
+import previewStyles from './preview.css';
+import { cofolioKatexCss } from './markdown-preview.jsx';
 
 export const inject = ['slots', 'documentPreviews', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
 const ASSETS = '/cofolio/reader-assets/';
 GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
 function sourcePath(address) {
-  const url = new URL(address);
-  const parts = url.pathname.split('/');
-  if (parts[1] !== 'session') throw new Error('Unsupported file address');
-  return parts.slice(3).map(decodeURIComponent).join('/');
+  return parseEditableAddress(address).path;
 }
 function PdfPage({ pdf, number, scale, baseSize, path, format, sessionId, onRendered }) {
   const holder = useRef(), canvas = useRef(), text = useRef();
@@ -56,6 +62,22 @@ function PdfPage({ pdf, number, scale, baseSize, path, format, sessionId, onRend
   </div><div className="cf-page-label" style={{ width: size.width }}>第 {number} 页</div></>;
 }
 
+async function inspectPdfPages(pdf, signal) {
+  const pageSizes = new Array(pdf.numPages);
+  let cursor = 0;
+  async function inspect() {
+    while (!signal?.aborted) {
+      const index = cursor++;
+      if (index >= pdf.numPages) return;
+      const page = await pdf.getPage(index + 1);
+      const viewport = page.getViewport({ scale: 1 });
+      pageSizes[index] = { width: viewport.width, height: viewport.height };
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, pdf.numPages) }, inspect));
+  return pageSizes;
+}
+
 async function loadPdfPreview({ sessionId, path, format, signal, report }) {
   report({ phase: 'prepare' });
   const response = await fetch(`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`, { signal });
@@ -89,18 +111,7 @@ async function loadPdfPreview({ sessionId, path, format, signal, report }) {
     stopPolling();
     parsingFinished = true;
     report({ phase: 'render' });
-    const pageSizes = new Array(pdf.numPages);
-    let cursor = 0;
-    async function inspectPages() {
-      while (!signal.aborted) {
-        const index = cursor++;
-        if (index >= pdf.numPages) return;
-        const page = await pdf.getPage(index + 1);
-        const viewport = page.getViewport({ scale: 1 });
-        pageSizes[index] = { width: viewport.width, height: viewport.height };
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(4, pdf.numPages) }, inspectPages));
+    const pageSizes = await inspectPdfPages(pdf, signal);
     if (signal.aborted) throw new DOMException('Preview load was cancelled', 'AbortError');
     signal.removeEventListener('abort', abort);
     completed = true;
@@ -111,8 +122,36 @@ async function loadPdfPreview({ sessionId, path, format, signal, report }) {
   }
 }
 
+function GeneratedPdfPreview({ bytes, path, sessionId }) {
+  const scroll = useRef();
+  const [preview, setPreview] = useState(), [scale, setScale] = useState(1), [error, setError] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    const loading = getDocument({ data: bytes.slice(), cMapUrl: ASSETS + 'cmaps/', cMapPacked: true, standardFontDataUrl: ASSETS + 'standard_fonts/', wasmUrl: ASSETS + 'wasm/', isEvalSupported: false });
+    loading.promise.then(async pdf => {
+      const pageSizes = await inspectPdfPages(pdf, controller.signal);
+      if (controller.signal.aborted) return;
+      const fitted = Math.min(1.4, Math.max(.25, ((scroll.current?.clientWidth || 640) - 32) / pageSizes[0].width));
+      setScale(fitted); setPreview({ pdf, pageSizes });
+    }).catch(loadError => { if (!controller.signal.aborted) setError(loadError.message); });
+    return () => { controller.abort(); void loading.destroy(); };
+  }, [bytes]);
+  useEffect(() => {
+    if (!preview || !scroll.current) return;
+    const observer = new ResizeObserver(entries => {
+      const width = entries[0].contentRect.width;
+      setScale(Math.min(1.4, Math.max(.25, (width - 32) / preview.pageSizes[0].width)));
+    });
+    observer.observe(scroll.current);
+    return () => observer.disconnect();
+  }, [preview]);
+  if (error) return <p className="cf-error" role="alert">{error}</p>;
+  return <div className="cf-pdf-scroll cf-generated-pdf" ref={scroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
+}
+
 function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
-  const path = sourcePath(resourceAddress), format = path.split('.').pop().toLowerCase();
+  const parsed = parseEditableAddress(resourceAddress), path = parsed.path, format = path.split('.').pop().toLowerCase();
+  sessionId = parsed.sessionId;
   const cacheKey = `${sessionId}\n${resourceAddress}`;
   const [preview, setPreview] = useState(), [error, setError] = useState(''), [scale, setScale] = useState(1), [page, setPage] = useState(1);
   const scroll = useRef(), root = useRef(), entryRef = useRef(), pendingScroll = useRef(), scrollFrame = useRef(), pageGeometry = useRef([]);
@@ -208,7 +247,7 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
     setAttempt(n => n + 1);
   }
   return <section ref={root} className="cf-reader">
-    <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><button className="cf-icon" aria-label="重新加载预览" title="重新加载预览" onClick={reload}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16 7a6.5 6.5 0 1 0 .2 5.5"/><path d="M16 3v4h-4"/></svg></button>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
+    <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><a className="cf-icon" href={`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a><button className="cf-icon" aria-label="重新加载预览" title="重新加载预览" onClick={reload}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16 7a6.5 6.5 0 1 0 .2 5.5"/><path d="M16 3v4h-4"/></svg></button>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
     {error && <p className="cf-error" role="alert">{error}</p>}
     {!firstReady && !error && <PreviewLoading key={`${resourceAddress}:${attempt}`} {...progress} office={format !== 'pdf'} />}
     <div className="cf-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
@@ -346,8 +385,12 @@ function installSelection(ctx, store) {
 export function apply(ctx) {
   const store = createAnnotationStore(sessionStorage);
   const previewCache = createPreviewCache({ maxEntries: 6 });
+  const documentStore = createDocumentStore();
+  const texCompiler = createTexCompiler();
   const PagedReader = props => <PagedTab {...props} cache={previewCache} />;
-  ctx.effect(() => () => { void previewCache.clear(); });
+  const Editor = props => <TextEditorTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={(pdf, info) => <GeneratedPdfPreview bytes={pdf} {...info} />} />;
+  const editable = address => { try { return !!editorKind(sourcePath(address)); } catch { return false; } };
+  ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
   const pagedId = 'dsh-cofolio-paged-reader';
@@ -365,8 +408,9 @@ export function apply(ctx) {
       const Native = entry.component;
       const Compatible = props => {
         const { tab } = props.useTabInfo();
-        const paged = /\.(pdf|docx?|pptx?)$/i.test(sourcePath(tab.contentId));
-        return paged ? <PagedReader {...props} /> : <Native {...props} />;
+        let path;
+        try { path = sourcePath(tab.contentId); } catch { return <Native {...props} />; }
+        return /\.(pdf|docx?|pptx?)$/i.test(path) ? <PagedReader {...props} /> : editable(tab.contentId) ? <Editor {...props} /> : <Native {...props} />;
       };
       // Keep this native entry's exclusive child-slot declaration and injected
       // render helpers; a second registration cannot redeclare that child.
@@ -376,7 +420,27 @@ export function apply(ctx) {
     install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.pane.tab', install);
     return () => { unsubscribe(); dispose?.(); };
   }));
-  ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles + loadingStyles + pageControlStyles; document.head.append(style); return () => style.remove(); });
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => {
+    let installed = false, dispose;
+    const install = () => {
+      if (installed) return;
+      const entry = ctx.slots.entries('sidebar.right.pane.tab.title').find(row => row.options.key === '@deepseek-ai/dsh-client-ui-sidebar-documentpreview');
+      if (!entry) return;
+      installed = true;
+      const Native = entry.component;
+      const EditableTitle = ({ address, ...props }) => {
+        const record = documentStore.open(address);
+        const snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
+        return <span className="cf-dirty-title">{snapshot.dirty && <span className="cf-dirty-dot" aria-label="未保存" />}<Native {...props} /></span>;
+      };
+      const DirtyTitle = props => { const { tab } = props.useTabInfo(); return editable(tab.contentId) ? <EditableTitle {...props} address={tab.contentId} /> : <Native {...props} />; };
+      entry.component = DirtyTitle;
+      dispose = () => { if (entry.component === DirtyTitle) entry.component = Native; };
+    };
+    install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.pane.tab.title', install);
+    return () => { unsubscribe(); dispose?.(); };
+  }));
+  ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles + loadingStyles + pageControlStyles + editorStyles + previewStyles + cofolioKatexCss; document.head.append(style); return () => style.remove(); });
   // Add selection provenance around native document bodies without replacing
   // Markdown rendering, syntax highlighting, or the existing viewer choices.
   ctx.effect(() => ctx.slots.inject('sidebar.right.tab.document', () => {

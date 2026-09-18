@@ -73,7 +73,8 @@ test('server and merged resolutions update every subscriber', async () => {
   const record = createDocumentStore({ request }).open(address);
   await record.load(); record.edit('mine');
   record.setConflict({ base: 'base', mine: 'mine', server: 'theirs', serverVersion: 'v2' });
-  record.useServer();
+  server = { text: 'theirs', version: 'v2' };
+  await record.useServer();
   assert.equal(record.getSnapshot().draft, 'theirs');
   assert.equal(record.getSnapshot().dirty, false);
   record.edit('merged');

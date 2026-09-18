@@ -92,10 +92,11 @@ export function createDocumentStore({ request = fetch } = {}) {
         if (!snapshot.conflict) throw new Error('No file conflict to merge');
         return saveVersion(text, snapshot.conflict.serverVersion, snapshot.conflict.server);
       },
-      useServer() {
-        if (!snapshot.conflict) return;
+      async useServer() {
+        if (!snapshot.conflict) return snapshot;
         const { server, serverVersion } = snapshot.conflict;
         publish({ base: server, draft: server, version: serverVersion, dirty: false, saving: false, error: null, conflict: null });
+        return load({ force: true });
       },
       setConflict(conflict) { publish({ conflict, dirty: true }); },
       clearError() { publish({ error: null }); },

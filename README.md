@@ -15,11 +15,15 @@
 | `dsh-cofolio-login` | 浏览器原生账密登录；服务器 YAML 配置；认证后允许远程修改 dsh 设置 |
 | `dsh-cofolio-terminal` | 持久 WebSocket 输入与控制；高延迟时合并按键；保留原生输出通道 |
 | `dsh-cofolio-files` | 上传文件/文件夹、保留结构；文件下载、文件夹 ZIP；重名询问与删除确认 |
-| `dsh-cofolio-reader` | PDF、Word、PPT 分页阅读、选中文字与来源注释；保留原生 Markdown 和代码渲染 |
+| `dsh-cofolio-reader` | PDF、Word、PPT 分页阅读；CodeMirror 文本编辑；Markdown/LaTeX 预览、导出与来源注释 |
 
 选区旁点击“添加到对话”，填写可选问题并点圆形勾确认；点击其他位置取消。多条注释收成一个小胶囊，悬浮展开；发送后胶囊位于消息上方。文件注释包含原文件路径和页码，对话注释包含原文与消息定位。
 
-Office 阅读链路：**PPT/PPTX、DOC/DOCX → ONLYOFFICE Document Builder → PDF.js 页面与文字层**。原文件不修改。Excel 暂不接入；在线文本编辑、LaTeX 排版及 OCR 不在当前版本中。
+Office 阅读链路：**PPT/PPTX、DOC/DOCX → ONLYOFFICE Document Builder → PDF.js 页面与文字层**。原文件不修改。Excel 与 OCR 暂不接入。
+
+UTF-8 文本文件使用 CodeMirror 编辑，支持语法高亮、未保存标记和 `Ctrl/Cmd+S`。保存使用文件版本进行原子比较；发生冲突时可选择服务器版本、确认覆盖或在 `@codemirror/merge` 中逐段合并。相同文件的编辑与预览标签共享草稿和保存状态。
+
+Markdown 以安全模式解析，数学公式由浏览器 KaTeX 渲染，导出时打印同一份预览 DOM。LaTeX 由浏览器 SwiftLaTeX XeTeX/dvipdfmx WASM 编译为 PDF；首次使用时通过服务器 `kpsewhich` 从 TeX Live 构建匹配格式并缓存，支持 `ctexart`、中文字体和常用 TikZ。PDF、Word、PPT 下载的是 PDF 阅读版本，源文件模式下载原文本。
 
 ## Linux 直接部署
 
@@ -37,6 +41,14 @@ sudo mkdir -p /opt/cofolio-onlyoffice
 sudo dpkg-deb -x onlyoffice-documentserver_amd64.deb /opt/cofolio-onlyoffice
 sudo fc-cache -f
 ```
+
+LaTeX 浏览器预览需要服务器提供 TeX Live 文件查询：
+
+```bash
+sudo apt install texlive-xetex texlive-lang-chinese texlive-pictures texlive-latex-extra
+```
+
+CoFolio 只通过 `kpsewhich` 读取所需格式、宏包和字体并缓存后传给浏览器 WASM，不在服务器执行用户的 `.tex` 文件。
 
 转换器路径为 `/opt/cofolio-onlyoffice/var/www/onlyoffice/documentserver/server/FileConverter/bin/docbuilder`。无需 LibreOffice、Python UNO、数据库或常驻编辑服务。解包目录约 2.1 GiB；只在转换期间运行 CLI，完成后退出。
 
@@ -118,9 +130,12 @@ previewWorkers: 1
 | `previewCacheVersion` | `'1'` | 原生转换器升级或字体更换后递增，使旧 PDF 失效 |
 | `maxPreviewBytes` | `104857600` | 原文档及输出 PDF 上限，100 MiB |
 | `maxUploadBytes` | `1073741824` | 单个上传文件上限，1 GiB |
+| `maxTextBytes` | `5242880` | 可编辑 UTF-8 文本上限，5 MiB |
 | `sessionHours` | `12` | WebSocket 登录凭据有效期 |
 
 首次打开时转换并缓存；原文件不变时直接命中 PDF，相同内容复用转换，并发请求合并。PDF 缓存默认约 512 MiB，按生成时间淘汰旧结果；不会复用原 LibreOffice 输出。
+
+浏览器 TeX 引擎随 reader 插件提供。服务器需要可执行的 `kpsewhich` 以及 XeTeX、中文和 TikZ TeX Live 包；TeX 文件会按需解析并缓存到 `<home>/preview-cache/texlive-cache`，浏览器生成的格式缓存在 IndexedDB。两类缓存均不包含用户文档。
 
 清理时先停止 CoFolio，只删除 `<home>/preview-cache` 内的内容，再启动。**不要删除整个 home**，其中保存会话和模型凭据。下次打开 Office 文件会重新转换。
 
@@ -158,4 +173,4 @@ COFOLIO_TEST_ONLYOFFICE=native COFOLIO_TEST_BUILDER=/path/to/docbuilder node --t
 
 注释提示词结构见 [docs/codex-selection-format.md](docs/codex-selection-format.md)。插件包含 dsh 0.1.6 专用适配，升级 dsh 前需要重新验证。
 
-仓库不附带 ONLYOFFICE 二进制或系统字体；相关第三方软件与字体遵循各自许可证。
+仓库不附带 ONLYOFFICE 二进制或系统字体；相关第三方软件与字体遵循各自许可证。reader 插件附带 SwiftLaTeX v20022022 的 XeTeX/dvipdfmx WebAssembly 发布资产、许可证和对应源码地址，详见 `packages/reader/vendor/swiftlatex/`。
