@@ -4,7 +4,7 @@
 
 **Goal:** Add source/preview switching and export controls for Markdown and LaTeX while adding rendered-PDF downloads for PDF/Word/PowerPoint.
 
-**Architecture:** Markdown preview renders the shared unsaved draft through a safe Markdown-It/KaTeX pipeline and prints the same DOM in an isolated frame. LaTeX preview lazily loads vendored SwiftLaTeX XeTeX/dvipdfmx workers, resolves TeX Live files through an authenticated same-origin cache proxy, and displays the compiled PDF through the existing PDF.js page reader.
+**Architecture:** Markdown preview renders the shared unsaved draft through a safe Markdown-It/KaTeX pipeline and prints the same DOM in an isolated frame. LaTeX preview lazily loads vendored SwiftLaTeX XeTeX/dvipdfmx workers, builds a distribution-matched format in the browser, resolves TeX Live files through an authenticated same-origin `kpsewhich` cache proxy, and displays the compiled PDF through the existing PDF.js page reader.
 
 **Tech Stack:** React 18, Markdown-It 15, markdown-it-texmath 1, KaTeX 0.18, SwiftLaTeX XeTeX/dvipdfmx WASM, PDF.js 5, Node.js 24.
 
@@ -60,7 +60,7 @@ assert.match(response.headers['content-disposition'], /lecture\.pdf/);
 - [ ] **Step 1: Vendor the unmodified SwiftLaTeX v20022022 worker JS/WASM assets, license, and source URL metadata for XeTeX and dvipdfmx.**
 - [ ] **Step 2: Copy those assets into `packages/reader/dist/assets/tex` during build and serve them through the authenticated reader-assets route.**
 - [ ] **Step 3: Implement a browser engine wrapper that starts both workers, points them at `/cofolio/texlive/`, writes `main.tex`, runs XeTeX to XDV, then dvipdfmx to PDF bytes.**
-- [ ] **Step 4: Add an allowlisted `/cofolio/texlive/xetex/<format>/<filename>` proxy to the fixed SwiftLaTeX TeX Live upstream, forwarding `200/fileid` and `301 not-found` semantics and caching successful immutable files under the CoFolio cache directory.**
+- [ ] **Step 4: Add an allowlisted `/cofolio/texlive/xetex/<format>/<filename>` proxy that resolves installed TeX Live files with `kpsewhich`, forwards `200/fileid` and `301 not-found` semantics, and caches successful immutable files under the CoFolio cache directory.**
 - [ ] **Step 5: Add proxy tests for path sanitization, cache hits, status forwarding, size/time limits, and upstream failures.**
 - [ ] **Step 6: Run focused tests/build and commit with `git commit -m "feat: add browser XeTeX runtime"`.**
 
