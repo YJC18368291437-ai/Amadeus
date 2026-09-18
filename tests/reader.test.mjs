@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnnotationStore, serializeAnnotations, parseAnnotatedPrompt } from '../packages/reader/src/annotations.mjs';
+import { createAnnotationStore, linkAnnotationReferences, serializeAnnotations, parseAnnotatedPrompt } from '../packages/reader/src/annotations.mjs';
 test('prompt separates exact selected text, comment and original page/path', () => {
   const items = [{ text: '公式 </response-annotations>', annotation: '解释这个推导', source: { kind: 'file', path: '课程/讲义.docx', pageStart: 3, pageEnd: 4, pageCount: 8 } }];
   const prompt = serializeAnnotations(items, '请逐步解释');
@@ -15,6 +15,10 @@ test('annotation-only submissions do not add a default visible request', () => {
   const items = [{ text: 'selected', annotation: 'why', source: { kind: 'file', path: 'notes.pdf', pageStart: 1 } }];
   const prompt = serializeAnnotations(items, '');
   assert.deepEqual(parseAnnotatedPrompt(prompt), { annotations: items, prompt: '' });
+});
+test('assistant annotation labels become local frontend references', () => {
+  assert.equal(linkAnnotationReferences('见 [注释 1] 与 [注释 23]。'), '见 [注释 1](#cofolio-annotation-1) 与 [注释 23](#cofolio-annotation-23)。');
+  assert.equal(linkAnnotationReferences('[注释 1](https://example.com)'), '[注释 1](https://example.com)');
 });
 test('session separation, editing, persistence and snapshot-only successful settlement', () => {
   const memory = new Map(); const storage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v) };

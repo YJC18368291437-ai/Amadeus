@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
-import { createAnnotationStore, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
+import { createAnnotationStore, linkAnnotationReferences, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
 import styles from '../../../ui/cofolio.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 import { PreviewLoading } from './loading.jsx';
@@ -264,7 +264,7 @@ async function loadPdfPreview({ sessionId, path, format, signal, report }) {
   }
 }
 
-function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange }) {
+function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange, focusPage, focusRevision }) {
   const scroll = useRef();
   const pageGeometry = useRef([]), scrollFrame = useRef(), manualScale = useRef(false);
   const [preview, setPreview] = useState(), [scale, setScale] = useState(1), [page, setPage] = useState(1), [error, setError] = useState('');
@@ -317,6 +317,11 @@ function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange }) {
     onControlsChange(preview ? { page, total: preview.pdf.numPages, go, zoom } : null);
     return () => onControlsChange(null);
   }, [go, onControlsChange, page, preview, zoom]);
+  useEffect(() => {
+    if (!preview || !focusPage) return;
+    const frame = requestAnimationFrame(() => go(focusPage));
+    return () => cancelAnimationFrame(frame);
+  }, [focusPage, focusRevision, go, preview]);
   useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
   function onScroll() {
     cancelAnimationFrame(scrollFrame.current);
@@ -332,7 +337,7 @@ function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange }) {
   return <div className="cf-pdf-scroll cf-generated-pdf" ref={scroll} onScroll={onScroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
 }
 
-function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible }) {
+function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible, focusPage, focusRevision }) {
   const parsed = parseEditableAddress(resourceAddress), path = parsed.path, format = path.split('.').pop().toLowerCase();
   sessionId = parsed.sessionId;
   const cacheKey = `${sessionId}\n${resourceAddress}`;
@@ -422,6 +427,11 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible 
     });
     updateCurrentPage();
   }, [preview, scale]);
+  useEffect(() => {
+    if (!preview || !focusPage) return;
+    const frame = requestAnimationFrame(() => go(focusPage));
+    return () => cancelAnimationFrame(frame);
+  }, [focusPage, focusRevision, preview]);
   useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
   function updateCurrentPage() {
     const container = scroll.current;
@@ -463,7 +473,8 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible 
 }
 function PagedTab({ useTabInfo, sessionId, cache }) {
   const { tab } = useTabInfo();
-  return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} cache={cache} visible={tab.visible} />;
+  const focus = tab.navigation.params?.cofolioAnnotation;
+  return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} cache={cache} visible={tab.visible} focusPage={focus?.page} focusRevision={tab.navigation.revision} />;
 }
 const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
 function AnnotationChip({ annotations }) {
@@ -492,6 +503,54 @@ function SentAnnotations({ node, renderMessageImages }) {
     {attachments.filter(b => b.type === 'file').map((b, index) => <span key={index}>附件：{b.attachment.name}</span>)}
     </div>}
   </section>;
+}
+function annotationEnvelope(node) {
+  if (!node || !['user', 'steering'].includes(node.kind)) return null;
+  const text = node.data.content.filter(block => block.type === 'text').map(block => block.text).join('');
+  return parseAnnotatedPrompt(text);
+}
+function AssistantAnnotationPopover({ annotation, number, position, onEnter, onLeave }) {
+  return <div className="cf-annotation-popover cf-annotation-reference-popover" style={position} role="tooltip" onMouseEnter={onEnter} onMouseLeave={onLeave}><div className="cf-annotation-list"><article className="cf-hover-note"><span className="cf-note-number">{number}。</span><div className="cf-note-copy"><span className="cf-note-label">所选文本：</span><blockquote>{denseText(annotation.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{annotation.annotation || '（无）'}</p>{annotation.source?.kind === 'file' && <small className="cf-note-source">{annotation.source.path}{annotation.source.pageStart ? ` · 第 ${annotation.source.pageStart} 页` : ''}</small>}</div></article></div></div>;
+}
+function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
+  const sourceNode = props.useChat(snapshot => {
+    const keys = snapshot.locations.getTurn(props.node.data.turn);
+    let matched;
+    for (const key of keys) {
+      const node = snapshot.nodes.get(key);
+      if (!node || node.anchorSeq >= props.node.anchorSeq) break;
+      if (annotationEnvelope(node)) matched = node;
+    }
+    return matched;
+  });
+  const envelope = useMemo(() => annotationEnvelope(sourceNode), [sourceNode]);
+  const annotations = envelope?.annotations ?? [];
+  const linkedNode = useMemo(() => annotations.length === 0 ? props.node : { ...props.node, data: { ...props.node.data, blocks: props.node.data.blocks.map(block => block.kind === 'text' ? { ...block, text: linkAnnotationReferences(block.text) } : block) } }, [annotations.length, props.node]);
+  const [popover, setPopover] = useState(null);
+  const hideTimer = useRef();
+  const reference = target => target instanceof Element ? target.closest('a[href^="#cofolio-annotation-"]') : null;
+  const reveal = anchor => {
+    const number = Number(anchor.getAttribute('href').match(/(\d+)$/)?.[1]);
+    const annotation = annotations[number - 1];
+    if (!annotation) return;
+    clearTimeout(hideTimer.current);
+    const rect = anchor.getBoundingClientRect();
+    setPopover({ annotation, number, position: { left: Math.max(8, Math.min(rect.left, innerWidth - 428)), ...(rect.top > 260 ? { bottom: innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) } });
+  };
+  const leave = () => { hideTimer.current = setTimeout(() => setPopover(null), 80); };
+  useEffect(() => () => clearTimeout(hideTimer.current), []);
+  if (annotations.length === 0) return <Native {...props} />;
+  return <div className="cf-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.getAttribute('href').match(/(\d+)$/)?.[1]); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} node={linkedNode} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
+}
+function focusConversationSource(source) {
+  const anchor = document.querySelector(`[data-chat-anchor-key="${CSS.escape(source.messageKey)}"]`);
+  if (!anchor) return;
+  anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  anchor.setAttribute('data-cf-annotation-target', '');
+  setTimeout(() => anchor.removeAttribute('data-cf-annotation-target'), 1600);
+}
+function sessionFileAddress(sessionId, path) {
+  return `dsh-resource://file/session/${encodeURIComponent(sessionId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
 }
 function AnnotationDock({ sessionId, store, useInput, inputActions }) {
   const items = useSyncExternalStore(store.subscribe, () => store.get(sessionId));
@@ -624,6 +683,14 @@ export function apply(ctx) {
   };
   const PreviewTitle = props => { const address = props.useTabInfo().tab.navigation.params?.address; return address ? <PreviewTitleContent address={address} /> : '预览'; };
   const editable = address => { try { return !!editorKind(sourcePath(address)); } catch { return false; } };
+  const openAnnotation = annotation => {
+    const source = annotation.source;
+    if (source?.kind === 'conversation') { focusConversationSource(source); return; }
+    if (source?.kind !== 'file') return;
+    const sessionId = ctx.sessions.list.getSnapshot().current;
+    if (!sessionId) return;
+    ctx.sidebarRight.openResource(sessionFileAddress(sessionId, source.path), { params: { cofolioAnnotation: { page: source.pageStart, text: annotation.text } } });
+  };
   const closeHost = document.createElement('div'), closeRoot = createRoot(closeHost), closeBypass = new Set();
   document.body.append(closeHost);
   const closeKey = (sessionId, tabId) => `${sessionId}\n${tabId}`;
@@ -738,9 +805,14 @@ export function apply(ctx) {
     function install() {
       for (const entry of ctx.slots.entries('conversation.chat.node')) {
         const kind = entry.options.key;
-        if (!['user', 'steering'].includes(kind) || installed.has(kind) || entry.options.registrant === 'cofolio-annotated-user') continue;
+        if (!['user', 'steering', 'assistant-step'].includes(kind) || installed.has(kind) || entry.options.registrant?.startsWith('cofolio-annotated-')) continue;
         installed.add(kind);
         const Native = entry.component;
+        if (kind === 'assistant-step') {
+          const WrappedAssistant = props => <AssistantWithAnnotationLinks {...props} Native={Native} openAnnotation={openAnnotation} />;
+          disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'cofolio-annotated-assistant' }, WrappedAssistant));
+          continue;
+        }
         const Wrapped = props => {
           const node = props.node;
           const text = node.data.content.filter(b => b.type === 'text').map(b => b.text).join('');

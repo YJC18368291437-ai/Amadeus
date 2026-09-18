@@ -21,6 +21,7 @@ export function TextEditorTab({ useTabInfo, documentStore, texCompiler, renderLa
   const address = tab.contentId;
   const { sessionId, path } = parseEditableAddress(address);
   const kind = editorKind(path);
+  const annotationNavigation = tab.navigation.params?.cofolioAnnotation;
   const record = documentStore.open(address);
   const snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
   const root = useRef(), editorHistory = useRef(), printRef = useRef(), latexDownloadRef = useRef();
@@ -29,6 +30,10 @@ export function TextEditorTab({ useTabInfo, documentStore, texCompiler, renderLa
 
   useEffect(() => { void record.load(); }, [record]);
   useEffect(() => { setHistory({ canUndo: false, canRedo: false }); }, [address]);
+  useEffect(() => {
+    if (!annotationNavigation) return;
+    record.setPreviewing(kind === 'latex' && !!annotationNavigation.page);
+  }, [record, tab.navigation.revision]);
   useEffect(() => {
     if (!tab.visible) return;
     const check = () => { if (document.visibilityState === 'visible') void record.check(); };
@@ -53,7 +58,7 @@ export function TextEditorTab({ useTabInfo, documentStore, texCompiler, renderLa
   }
   return <section ref={root} className="cf-editor-shell" data-cf-path={path} data-cf-format={path.split('.').pop().toLowerCase()} data-cf-session={sessionId}>
     <DocumentToolbar path={preview ? `${path} · 预览` : path} onUndo={() => editorHistory.current?.undo()} undoDisabled={preview || !history.canUndo} onRedo={() => editorHistory.current?.redo()} redoDisabled={preview || !history.canRedo} inlinePreview={preview} onToggleInlinePreview={previewable ? () => record.setPreviewing(!preview) : undefined} onOpenBeside={previewable ? () => onOpenPreviewBeside({ address, panelId: panel.id }) : undefined} onSave={() => void record.save()} saveDisabled={snapshot.status !== 'ready' || !snapshot.dirty || snapshot.saving || !!snapshot.conflict} saving={snapshot.saving} onDownload={download} downloadDisabled={preview && kind === 'latex' && !latexReady} wrap={wrap} onToggleWrap={!preview ? () => setWrap(value => !value) : undefined}>{preview && kind === 'latex' && latexControls ? <><PageControl page={latexControls.page} total={latexControls.total} onChange={latexControls.go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => latexControls.zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => latexControls.zoom(.1)}>＋</button></> : !preview ? <><button className="cf-icon" type="button" aria-label="减小字号" title="减小字号" disabled={fontSize <= 9} onClick={() => setFontSize(current => clampZoom(current - 1, 9, 32))}>−</button><button className="cf-icon" type="button" aria-label="增大字号" title="增大字号" disabled={fontSize >= 32} onClick={() => setFontSize(current => clampZoom(current + 1, 9, 32))}>＋</button></> : null}</DocumentToolbar>
-    {snapshot.status === 'loading' || snapshot.status === 'idle' ? <div className="cf-editor-loading" role="status">正在加载…</div> : snapshot.status === 'error' ? <p className="cf-error" role="alert">{snapshot.error?.message}</p> : <><CodeEditor path={path} value={snapshot.draft} onChange={record.edit} onSave={record.save} historyRef={editorHistory} onHistoryChange={setHistory} fontSize={fontSize} onFontSizeChange={setFontSize} wrap={wrap} hidden={preview} />{preview && kind === 'markdown' ? <MarkdownPreview source={snapshot.base} path={path} printRef={printRef} /> : preview && kind === 'latex' ? <LatexPreview source={snapshot.base} path={path} compiler={texCompiler} downloadRef={latexDownloadRef} onReady={onLatexReady} renderPdf={pdf => renderLatexPdf(pdf, { path, sessionId, onControlsChange: setLatexControls })} /> : null}</>}
+    {snapshot.status === 'loading' || snapshot.status === 'idle' ? <div className="cf-editor-loading" role="status">正在加载…</div> : snapshot.status === 'error' ? <p className="cf-error" role="alert">{snapshot.error?.message}</p> : <><CodeEditor path={path} value={snapshot.draft} onChange={record.edit} onSave={record.save} historyRef={editorHistory} onHistoryChange={setHistory} fontSize={fontSize} onFontSizeChange={setFontSize} wrap={wrap} hidden={preview} reveal={annotationNavigation ? { text: annotationNavigation.text, revision: tab.navigation.revision } : undefined} />{preview && kind === 'markdown' ? <MarkdownPreview source={snapshot.base} path={path} printRef={printRef} /> : preview && kind === 'latex' ? <LatexPreview source={snapshot.base} path={path} compiler={texCompiler} downloadRef={latexDownloadRef} onReady={onLatexReady} renderPdf={pdf => renderLatexPdf(pdf, { path, sessionId, onControlsChange: setLatexControls, focusPage: annotationNavigation?.page, focusRevision: tab.navigation.revision })} /> : null}</>}
     <ConflictModal record={record} snapshot={snapshot} />
   </section>;
 }

@@ -9,4 +9,5 @@
 .cf-conflict-actions{flex-wrap:wrap}.cf-conflict-confirm{height:1px}
 div:has(> [data-presented-files-row])>span:empty{display:none}
 body[data-cf-annotation-submitting] [data-submission-echo]{display:none}
+.cf-assistant-annotations a[href^="#cofolio-annotation-"]{display:inline-flex;align-items:center;color:var(--dsw-alias-state-business-primary);font-weight:500;text-decoration:none;border-radius:5px;padding:0 2px;cursor:pointer}.cf-assistant-annotations a[href^="#cofolio-annotation-"]:hover,.cf-assistant-annotations a[href^="#cofolio-annotation-"]:focus-visible{background:var(--dsw-alias-interactive-bg-hover);outline:none}.cf-annotation-reference-popover{z-index:1100}.cf-annotation-reference-popover .cf-note-source{margin-top:7px}[data-cf-annotation-target]{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:5px;border-radius:8px;transition:outline-color .2s}
 @media(max-width:720px){.cf-conflict-labels{gap:8px}.cf-conflict-merge{min-height:260px;height:55vh}.cf-conflict-actions{justify-content:stretch}.cf-conflict-actions>*{flex:1}}

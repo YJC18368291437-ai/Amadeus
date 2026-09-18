@@ -17,6 +17,9 @@ export function parseAnnotatedPrompt(text) {
     return { annotations, prompt: text.slice(at + separator.length) };
   } catch { return null; }
 }
+export function linkAnnotationReferences(text) {
+  return text.replace(/\[注释\s*(\d+)\](?!\()/g, (label, number) => `[${label.slice(1, -1)}](#cofolio-annotation-${number})`);
+}
 export function createAnnotationStore(storage) {
   const states = new Map(), listeners = new Set();
   function get(sessionId) {
