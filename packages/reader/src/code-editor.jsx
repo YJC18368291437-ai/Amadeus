@@ -1,12 +1,14 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { basicSetup } from 'codemirror';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { languageExtension } from './editor-language.mjs';
+import { useCtrlWheelZoom } from './wheel-zoom.jsx';
+import { clampZoom } from './zoom.mjs';
 
 const cofolioTheme = EditorView.theme({
   '&': { height: '100%', color: 'var(--dsw-alias-label-primary)', backgroundColor: 'var(--dsw-alias-bg-base)' },
-  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--ds-font-family-code, ui-monospace, monospace)' },
+  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--ds-font-family-code, ui-monospace, monospace)', fontSize: 'var(--cf-editor-font-size, 13px)' },
   '.cm-content': { caretColor: 'var(--dsw-alias-label-primary)', padding: '10px 0' },
   '.cm-gutters': { backgroundColor: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-caption)', borderRight: '.5px solid var(--dsw-alias-border-l4)' },
   '.cm-activeLine,.cm-activeLineGutter': { backgroundColor: 'var(--dsw-alias-interactive-bg-hover)' },
@@ -16,6 +18,8 @@ const cofolioTheme = EditorView.theme({
 
 export function CodeEditor({ path, value, onChange, onSave, scrollportRef, wrap = true }) {
   const holder = useRef(), viewRef = useRef(), wrapCompartment = useRef(), current = useRef(value), callbacks = useRef({ onChange, onSave });
+  const [fontSize, setFontSize] = useState(13);
+  useCtrlWheelZoom(holder, delta => setFontSize(currentSize => clampZoom(currentSize + delta * 10, 9, 32)));
   callbacks.current = { onChange, onSave };
 
   useEffect(() => {
@@ -66,5 +70,5 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef, wrap 
     if (viewRef.current && wrapCompartment.current) viewRef.current.dispatch({ effects: wrapCompartment.current.reconfigure(wrap ? EditorView.lineWrapping : []) });
   }, [wrap]);
 
-  return <div ref={holder} className="cf-code-editor" />;
+  return <div ref={holder} className="cf-code-editor" style={{ '--cf-editor-font-size': `${fontSize}px` }} />;
 }

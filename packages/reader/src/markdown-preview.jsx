@@ -1,6 +1,8 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import katexCss from 'katex/dist/katex.min.css';
 import { renderMarkdown } from './markdown-render.mjs';
+import { useCtrlWheelZoom } from './wheel-zoom.jsx';
+import { clampZoom } from './zoom.mjs';
 
 export const cofolioKatexCss = katexCss.replaceAll('url(fonts/', 'url(/cofolio/reader-assets/katex/fonts/');
 
@@ -37,8 +39,10 @@ export async function printMarkdown({ title, html }) {
 
 export function MarkdownPreview({ source, path, printRef }) {
   const html = useMemo(() => renderMarkdown(source), [source]);
-  const latest = useRef();
+  const latest = useRef(), preview = useRef();
+  const [scale, setScale] = useState(1);
+  useCtrlWheelZoom(preview, delta => setScale(current => clampZoom(current + delta, .5, 2.5)));
   latest.current = () => printMarkdown({ title: path.split('/').pop().replace(/\.(md|markdown)$/i, ''), html });
   if (printRef) printRef.current = () => latest.current();
-  return <article className="cf-markdown-preview" dangerouslySetInnerHTML={{ __html: html }} />;
+  return <article ref={preview} className="cf-markdown-preview" style={{ '--cf-markdown-font-size': `${14 * scale}px` }} dangerouslySetInnerHTML={{ __html: html }} />;
 }

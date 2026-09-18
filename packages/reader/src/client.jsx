@@ -22,6 +22,8 @@ import editorStyles from './editor.css';
 import previewStyles from './preview.css';
 import { cofolioKatexCss } from './markdown-preview.jsx';
 import { RenderedPreviewTab } from './rendered-preview-tab.jsx';
+import { useCtrlWheelZoom } from './wheel-zoom.jsx';
+import { clampZoom } from './zoom.mjs';
 
 export const inject = ['slots', 'documentPreviews', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
 const ASSETS = '/cofolio/reader-assets/';
@@ -126,6 +128,7 @@ async function loadPdfPreview({ sessionId, path, format, signal, report }) {
 function GeneratedPdfPreview({ bytes, path, sessionId }) {
   const scroll = useRef();
   const [preview, setPreview] = useState(), [scale, setScale] = useState(1), [error, setError] = useState('');
+  useCtrlWheelZoom(scroll, delta => setScale(current => clampZoom(current + delta, .25, 3)));
   useEffect(() => {
     const controller = new AbortController();
     const loading = getDocument({ data: bytes.slice(), cMapUrl: ASSETS + 'cmaps/', cMapPacked: true, standardFontDataUrl: ASSETS + 'standard_fonts/', wasmUrl: ASSETS + 'wasm/', isEvalSupported: false });
@@ -238,11 +241,12 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
   }
   function zoom(delta) {
     setScale(current => {
-      const next = Math.max(.25, Math.min(3, current + delta));
+      const next = clampZoom(current + delta, .25, 3);
       entryRef.current?.setView({ scale: next, page, scrollTop: scroll.current?.scrollTop ?? 0 });
       return next;
     });
   }
+  useCtrlWheelZoom(scroll, zoom);
   function reload() {
     void cache.invalidate(cacheKey);
     setAttempt(n => n + 1);
