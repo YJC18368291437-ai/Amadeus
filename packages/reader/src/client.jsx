@@ -65,35 +65,52 @@ function replaceConversationHeadline(ctx) {
   const unsubscribe = ctx.slots.subscribe('main.conversation', install);
   return () => { unsubscribe(); if (entry?.component === Branded) entry.component = Native; };
 }
+function reduceConversationMinimum(ctx) {
+  let entry, Native, Compact;
+  const install = () => {
+    if (entry) return;
+    const candidate = ctx.slots.entries('root')[0];
+    if (!candidate) return;
+    entry = candidate; Native = candidate.component;
+    Compact = props => {
+      const useStore = selector => props.useStore(state => {
+        const width = state.layoutInfo.viewportWidth;
+        if (width < 1024) return selector(state);
+        return selector({ ...state, layoutInfo: { ...state.layoutInfo, viewportWidth: width + 80 } });
+      });
+      return <Native {...props} useStore={useStore} />;
+    };
+    candidate.component = Compact;
+  };
+  install();
+  const unsubscribe = ctx.slots.subscribe('root', install);
+  return () => { unsubscribe(); if (entry?.component === Compact) entry.component = Native; };
+}
+function delayQueueDock(ctx) {
+  let entry, Native, Delayed;
+  const install = () => {
+    if (entry) return;
+    const candidate = ctx.slots.entries('conversation.input.dock').find(row => row.options.id === 'queue');
+    if (!candidate) return;
+    entry = candidate; Native = candidate.component;
+    Delayed = props => {
+      const active = props.useSession(state => state.queue.some(item => item.placement === 'queued') || state.pendingSubmissions.some(item => item.placement === 'queued'));
+      const [visible, setVisible] = useState(false);
+      useEffect(() => {
+        if (!active) { setVisible(false); return; }
+        const timer = setTimeout(() => setVisible(true), 180);
+        return () => clearTimeout(timer);
+      }, [active]);
+      return active && visible ? <Native {...props} /> : null;
+    };
+    candidate.component = Delayed;
+  };
+  install();
+  const unsubscribe = ctx.slots.subscribe('conversation.input.dock', install);
+  return () => { unsubscribe(); if (entry?.component === Delayed) entry.component = Native; };
+}
 function sourcePath(address) {
   return parseEditableAddress(address).path;
-}
-function usePdfDragPan() {
-  const drag = useRef();
-  const onPointerDown = useCallback(event => {
-    if (event.pointerType !== 'mouse' || event.button !== 0 || event.target !== event.currentTarget) return;
-    const element = event.currentTarget;
-    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop, moved: false };
-    element.setPointerCapture(event.pointerId);
-  }, []);
-  const onPointerMove = useCallback(event => {
-    const current = drag.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    const dx = event.clientX - current.x, dy = event.clientY - current.y;
-    if (!current.moved && Math.hypot(dx, dy) < 3) return;
-    current.moved = true;
-    event.currentTarget.dataset.cfPanning = '';
-    event.currentTarget.scrollLeft = current.left - dx;
-    event.currentTarget.scrollTop = current.top - dy;
-    event.preventDefault();
-  }, []);
-  const stop = useCallback(event => {
-    const current = drag.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    delete event.currentTarget.dataset.cfPanning;
-    drag.current = undefined;
-  }, []);
-  return { onPointerDown, onPointerMove, onPointerUp: stop, onPointerCancel: stop, onLostPointerCapture: stop };
 }
 function usePdfPinchZoom(elementRef, scale, onScale) {
   const latest = useRef({ scale, onScale });
@@ -231,7 +248,6 @@ async function loadPdfPreview({ sessionId, path, format, signal, report }) {
 
 function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange }) {
   const scroll = useRef();
-  const dragPan = usePdfDragPan();
   const pageGeometry = useRef([]), scrollFrame = useRef(), manualScale = useRef(false);
   const [preview, setPreview] = useState(), [scale, setScale] = useState(1), [page, setPage] = useState(1), [error, setError] = useState('');
   const zoom = useCallback(delta => {
@@ -295,7 +311,7 @@ function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange }) {
     });
   }
   if (error) return <p className="cf-error" role="alert">{error}</p>;
-  return <div className="cf-pdf-scroll cf-generated-pdf" ref={scroll} onScroll={onScroll} {...dragPan}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
+  return <div className="cf-pdf-scroll cf-generated-pdf" ref={scroll} onScroll={onScroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
 }
 
 function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible }) {
@@ -304,7 +320,6 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible 
   const cacheKey = `${sessionId}\n${resourceAddress}`;
   const [preview, setPreview] = useState(), [error, setError] = useState(''), [scale, setScale] = useState(1), [page, setPage] = useState(1);
   const scroll = useRef(), root = useRef(), entryRef = useRef(), pendingScroll = useRef(), scrollFrame = useRef(), pageGeometry = useRef([]);
-  const dragPan = usePdfDragPan();
   const [attempt, setAttempt] = useState(0), [progress, setProgress] = useState({ phase: 'prepare' }), [firstReady, setFirstReady] = useState(false);
   const onRendered = useCallback((_number, failure) => {
     if (failure) setError(failure.message); else setFirstReady(true);
@@ -425,7 +440,7 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible 
     <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><a className="cf-icon" href={`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
     {error && <p className="cf-error" role="alert">{error}</p>}
     {!firstReady && !error && <PreviewLoading key={`${resourceAddress}:${attempt}`} {...progress} office={format !== 'pdf'} />}
-    <div className="cf-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }} {...dragPan}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
+    <div className="cf-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
   </section>;
 }
 function PagedTab({ useTabInfo, sessionId, cache }) {
@@ -616,6 +631,8 @@ export function apply(ctx) {
   ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
   ctx.effect(() => ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark' }, AmadeusBrandMark)));
   ctx.effect(() => ctx.slots.inject('main.conversation', () => replaceConversationHeadline(ctx)));
+  ctx.effect(() => ctx.slots.inject('root', () => reduceConversationMinimum(ctx)));
+  ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => delayQueueDock(ctx)));
   ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
