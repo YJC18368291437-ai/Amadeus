@@ -15,7 +15,11 @@ export function byteRange(value, size) {
   return { start, end };
 }
 
-export async function sendPdf(req, res, source) {
+function contentDisposition(filename) {
+  return `attachment; filename="document.pdf"; filename*=UTF-8''${encodeURIComponent(filename).replace(/[!'()*]/g, char => '%' + char.charCodeAt(0).toString(16))}`;
+}
+
+export async function sendPdf(req, res, source, { filename } = {}) {
   const file = await open(source);
   try {
     const info = await file.stat({ bigint: true }), size = Number(info.size);
@@ -24,6 +28,7 @@ export async function sendPdf(req, res, source) {
       'Content-Type': 'application/pdf', 'Accept-Ranges': 'bytes', ETag: etag,
       'Cache-Control': 'private, no-cache, must-revalidate, no-transform',
       'Content-Encoding': 'identity', 'X-Content-Type-Options': 'nosniff',
+      ...(filename ? { 'Content-Disposition': contentDisposition(filename) } : {}),
     };
     if (req.headers['if-none-match']?.split(',').some(value => value.trim().replace(/^W\//, '') === etag || value.trim() === '*')) {
       res.writeHead(304, headers); res.end(); return;

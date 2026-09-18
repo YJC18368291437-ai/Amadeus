@@ -5,10 +5,12 @@ import { stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { createConverter, fileVersion } from './convert.mjs';
 import { sendPdf } from './pdf-http.mjs';
+import { createTexliveProxy } from './texlive-proxy.mjs';
 import { HttpError, json, sessionRoot, resolveWithin, routeErrors } from '../../files/src/workspace.mjs';
 export const inject = ['webServer', 'sessions'];
 export function apply(ctx, config = {}) {
   const converter = createConverter(config);
+  const texlive = createTexliveProxy({ cacheDir: config.texliveCacheDir ?? path.join(config.cacheDir ?? path.dirname(fileURLToPath(import.meta.url)), 'texlive-cache'), upstream: config.texliveUpstream });
   ctx.effect(() => () => converter.dispose());
   const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/cofolio/reader-assets', handler: routeErrors(async (req, res) => {
@@ -17,9 +19,14 @@ export function apply(ctx, config = {}) {
     const target = await resolveWithin(assets, relative);
     const info = await stat(target);
     if (!info.isFile()) throw new HttpError(404, 'Asset not found');
-    const contentType = target.endsWith('.mjs') ? 'text/javascript' : target.endsWith('.wasm') ? 'application/wasm' : 'application/octet-stream';
+    const contentType = target.endsWith('.mjs') || target.endsWith('.js') ? 'text/javascript' : target.endsWith('.wasm') ? 'application/wasm' : target.endsWith('.woff2') ? 'font/woff2' : target.endsWith('.woff') ? 'font/woff' : 'application/octet-stream';
     res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': info.size, 'Cache-Control': 'private, max-age=3600' });
     await pipeline(createReadStream(target), res);
+  }) }));
+  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/cofolio/texlive', handler: routeErrors(async (req, res) => {
+    if (req.method !== 'GET') throw new HttpError(405, 'GET required');
+    const relative = decodeURIComponent(new URL(req.url, 'http://cofolio').pathname.slice('/cofolio/texlive/'.length));
+    await texlive.handle(relative, res);
   }) }));
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/cofolio/preview', handler: routeErrors(async (req, res) => {
     if (!['GET', 'HEAD'].includes(req.method)) throw new HttpError(405, 'GET or HEAD required');
@@ -45,6 +52,8 @@ export function apply(ctx, config = {}) {
     if (fileVersion(await stat(original, { bigint: true })) !== version) throw new HttpError(409, 'Document changed; reopen the preview');
     const info = await stat(source);
     if (info.size > (config.maxFileBytes ?? 100 * 1024 ** 2)) throw new HttpError(413, 'Document exceeds the preview size limit');
-    await sendPdf(req, res, source);
+    const extension = path.extname(original);
+    const filename = url.searchParams.get('download') === '1' ? path.basename(original, extension) + '.pdf' : undefined;
+    await sendPdf(req, res, source, { filename });
   }) }));
 }

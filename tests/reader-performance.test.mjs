@@ -42,6 +42,19 @@ test('PDF ranges, validators, HEAD and stale If-Range preserve exact bytes', asy
   await writeFile(source, '%PDF-new revision');
   assert.equal((await fetch(url, { headers: { 'If-None-Match': tag } })).status, 200);
 });
+
+test('PDF attachment mode keeps exact bytes and an UTF-8 filename', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cofolio-pdf-download-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = path.join(directory, 'source.pdf');
+  const bytes = Buffer.from('%PDF-download');
+  await writeFile(source, bytes);
+  const url = await listen(t, (req, res) => sendPdf(req, res, source, { filename: '讲义.pdf' }));
+  const response = await fetch(url);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+  assert.match(response.headers.get('content-disposition'), /attachment;/);
+  assert.match(response.headers.get('content-disposition'), /%E8%AE%B2%E4%B9%89\.pdf/);
+});
 test('metadata route does not convert; replaced files reject an old range URL', async t => {
   const root = await directory(t), source = path.join(root, 'slides.pptx');
   await writeFile(source, 'pretend-presentation');

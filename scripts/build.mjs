@@ -19,4 +19,8 @@ await mkdir(pdfAssets, { recursive: true });
 await cp(path.join(root, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'), path.join(pdfAssets, 'pdf.worker.min.mjs'));
 for (const name of ['cmaps', 'standard_fonts', 'wasm']) await cp(path.join(root, 'node_modules/pdfjs-dist', name), path.join(pdfAssets, name), { recursive: true });
 await cp(path.join(root, 'node_modules/pdfjs-dist/LICENSE'), path.join(pdfAssets, 'PDFJS-LICENSE'));
+await cp(path.join(root, 'packages/reader/vendor/swiftlatex'), path.join(pdfAssets, 'tex'), { recursive: true });
+await mkdir(path.join(pdfAssets, 'katex'), { recursive: true });
+await cp(path.join(root, 'node_modules/katex/dist/fonts'), path.join(pdfAssets, 'katex/fonts'), { recursive: true });
+await cp(path.join(root, 'node_modules/katex/LICENSE'), path.join(pdfAssets, 'katex/KATEX-LICENSE'));
 }
