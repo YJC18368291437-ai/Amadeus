@@ -47,6 +47,24 @@ function replaceBrandSlot(ctx, name, Replacement) {
   const unsubscribe = ctx.slots.subscribe(name, install);
   return () => { unsubscribe(); if (entry?.component === Replacement) entry.component = Native; };
 }
+function replaceConversationHeadline(ctx) {
+  let entry, Native, Branded;
+  const install = () => {
+    if (entry) return;
+    const candidate = ctx.slots.entries('main.conversation')[0];
+    if (!candidate) return;
+    entry = candidate; Native = candidate.component;
+    Branded = props => {
+      const translate = props.t;
+      const t = (key, params) => key === 'hero.headline' ? 'El Psy Kongroo' : translate(key, params);
+      return <Native {...props} t={t} />;
+    };
+    candidate.component = Branded;
+  };
+  install();
+  const unsubscribe = ctx.slots.subscribe('main.conversation', install);
+  return () => { unsubscribe(); if (entry?.component === Branded) entry.component = Native; };
+}
 function sourcePath(address) {
   return parseEditableAddress(address).path;
 }
@@ -483,6 +501,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.slots.inject('sidebar.brand.mark', () => replaceBrandSlot(ctx, 'sidebar.brand.mark', AmadeusBrandMark)));
   ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
   ctx.effect(() => ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark' }, AmadeusBrandMark)));
+  ctx.effect(() => ctx.slots.inject('main.conversation', () => replaceConversationHeadline(ctx)));
   ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
