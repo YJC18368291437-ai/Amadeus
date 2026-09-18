@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createRoot } from 'react-dom/client';
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
-import { createAnnotationStore, linkAnnotationReferences, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
+import { createAnnotationStore, findAnnotationReferences, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
 import styles from '../../../ui/cofolio.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 import { PreviewLoading } from './loading.jsx';
@@ -491,6 +491,34 @@ function annotationEnvelope(node) {
 function AssistantAnnotationPopover({ annotation, number, position, onEnter, onLeave }) {
   return <div className="cf-annotation-popover cf-annotation-reference-popover" style={position} role="tooltip" onMouseEnter={onEnter} onMouseLeave={onLeave}><div className="cf-annotation-list"><article className="cf-hover-note"><span className="cf-note-number">{number}。</span><div className="cf-note-copy"><span className="cf-note-label">所选文本：</span><blockquote>{denseText(annotation.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{annotation.annotation || '（无）'}</p>{annotation.source?.kind === 'file' && <small className="cf-note-source">{annotation.source.path}{annotation.source.pageStart ? ` · 第 ${annotation.source.pageStart} 页` : ''}</small>}</div></article></div></div>;
 }
+function decorateAnnotationReferences(root, maximum) {
+  if (!root || maximum < 1) return;
+  const doc = root.ownerDocument;
+  const walker = doc.createTreeWalker(root, doc.defaultView.NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  for (const textNode of textNodes) {
+    const parent = textNode.parentElement;
+    if (!parent || parent.closest('a,button,code,pre,kbd,samp,script,style,textarea,input,.cf-annotation-popover,[data-cf-annotation-ref]')) continue;
+    const references = findAnnotationReferences(textNode.data, maximum);
+    if (references.length === 0) continue;
+    const fragment = doc.createDocumentFragment();
+    let offset = 0;
+    for (const reference of references) {
+      if (reference.start > offset) fragment.append(textNode.data.slice(offset, reference.start));
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.className = 'cf-annotation-reference';
+      button.dataset.cfAnnotationRef = String(reference.number);
+      button.setAttribute('aria-label', `查看注释 ${reference.number}`);
+      button.textContent = `注释 ${reference.number}`;
+      fragment.append(button);
+      offset = reference.end;
+    }
+    if (offset < textNode.data.length) fragment.append(textNode.data.slice(offset));
+    textNode.replaceWith(fragment);
+  }
+}
 function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
   const sourceNode = props.useChat(snapshot => {
     const keys = snapshot.locations.getTurn(props.node.data.turn);
@@ -504,12 +532,12 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
   });
   const envelope = useMemo(() => annotationEnvelope(sourceNode), [sourceNode]);
   const annotations = envelope?.annotations ?? [];
-  const linkedNode = useMemo(() => annotations.length === 0 ? props.node : { ...props.node, data: { ...props.node.data, blocks: props.node.data.blocks.map(block => block.kind === 'text' ? { ...block, text: linkAnnotationReferences(block.text, annotations.length) } : block) } }, [annotations.length, props.node]);
+  const root = useRef();
   const [popover, setPopover] = useState(null);
   const hideTimer = useRef();
-  const reference = target => target instanceof Element ? target.closest('a[href^="#cofolio-annotation-"]') : null;
+  const reference = target => target instanceof Element ? target.closest('[data-cf-annotation-ref]') : null;
   const reveal = anchor => {
-    const number = Number(anchor.getAttribute('href').match(/(\d+)$/)?.[1]);
+    const number = Number(anchor.dataset.cfAnnotationRef);
     const annotation = annotations[number - 1];
     if (!annotation) return;
     clearTimeout(hideTimer.current);
@@ -518,8 +546,25 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
   };
   const leave = () => { hideTimer.current = setTimeout(() => setPopover(null), 80); };
   useEffect(() => () => clearTimeout(hideTimer.current), []);
+  useLayoutEffect(() => {
+    const element = root.current;
+    if (!element || annotations.length === 0) return;
+    let scheduled = false;
+    const decorate = () => {
+      scheduled = false;
+      decorateAnnotationReferences(element, annotations.length);
+    };
+    decorate();
+    const observer = new element.ownerDocument.defaultView.MutationObserver(() => {
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(decorate);
+    });
+    observer.observe(element, { childList: true, characterData: true, subtree: true });
+    return () => observer.disconnect();
+  }, [annotations.length, props.node]);
   if (annotations.length === 0) return <Native {...props} />;
-  return <div className="cf-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.getAttribute('href').match(/(\d+)$/)?.[1]); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} node={linkedNode} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
+  return <div ref={root} className="cf-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.dataset.cfAnnotationRef); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
 }
 function focusConversationSource(source) {
   const anchor = document.querySelector(`[data-chat-anchor-key="${CSS.escape(source.messageKey)}"]`);

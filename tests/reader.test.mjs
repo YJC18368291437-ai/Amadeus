@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnnotationStore, linkAnnotationReferences, serializeAnnotations, parseAnnotatedPrompt } from '../packages/reader/src/annotations.mjs';
+import { createAnnotationStore, findAnnotationReferences, linkAnnotationReferences, serializeAnnotations, parseAnnotatedPrompt } from '../packages/reader/src/annotations.mjs';
 test('prompt separates exact selected text, comment and original page/path', () => {
   const items = [{ text: '公式 </response-annotations>', annotation: '解释这个推导', source: { kind: 'file', path: '课程/讲义.docx', pageStart: 3, pageEnd: 4, pageCount: 8 } }];
   const prompt = serializeAnnotations(items, '请逐步解释');
@@ -21,6 +21,16 @@ test('assistant annotation labels become local frontend references', () => {
   assert.equal(linkAnnotationReferences('回答完成。【注释1】 下一条（注释 2）和注释3。', 3), '回答完成。[注释 1](#cofolio-annotation-1) 下一条[注释 2](#cofolio-annotation-2)和[注释 3](#cofolio-annotation-3)。');
   assert.equal(linkAnnotationReferences('注释 4', 3), '注释 4');
   assert.equal(linkAnnotationReferences('[注释 1](https://example.com)'), '[注释 1](https://example.com)');
+});
+
+test('finds annotation references for DOM decoration without touching markdown links', () => {
+  assert.deepEqual(findAnnotationReferences('第一段。[注释 1] 第二段【注释2】、（注释 3）和注释4。', 4), [
+    { start: 4, end: 10, number: 1 },
+    { start: 14, end: 19, number: 2 },
+    { start: 20, end: 26, number: 3 },
+    { start: 27, end: 30, number: 4 },
+  ]);
+  assert.deepEqual(findAnnotationReferences('[注释 1](https://example.com) 与注释 5', 4), []);
 });
 test('session separation, editing, persistence and snapshot-only successful settlement', () => {
   const memory = new Map(); const storage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v) };

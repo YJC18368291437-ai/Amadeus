@@ -23,6 +23,17 @@ export function linkAnnotationReferences(text, maximum = Number.POSITIVE_INFINIT
     .replace(/(?:\[|【|（|\()注释\s*(\d+)(?:\]|】|）|\))(?!\()/g, (label, number) => linked(number) ?? label)
     .replace(/(?<![\[【（(])注释\s*(\d+)(?!\s*[\]】）)]|\s*\()/g, (label, number) => linked(number) ?? label);
 }
+export function findAnnotationReferences(text, maximum = Number.POSITIVE_INFINITY) {
+  const references = [];
+  const pattern = /[\[【（(]注释\s*(\d+)[\]】）)]|注释\s*(\d+)/g;
+  for (const match of text.matchAll(pattern)) {
+    const number = Number(match[1] ?? match[2]);
+    const bracketed = match[1] !== undefined;
+    if (number < 1 || number > maximum || (bracketed && text[match.index + match[0].length] === '(')) continue;
+    references.push({ start: match.index, end: match.index + match[0].length, number });
+  }
+  return references;
+}
 export function createAnnotationStore(storage) {
   const states = new Map(), listeners = new Set();
   function get(sessionId) {
