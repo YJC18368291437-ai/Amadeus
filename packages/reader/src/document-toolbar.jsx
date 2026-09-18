@@ -4,6 +4,10 @@ export function DownloadIcon() {
   return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 2v10m-4-4 4 4 4-4"/><path d="M3 14v3h14v-3"/></svg>;
 }
 
+function SaveIcon() {
+  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 3h11l3 3v11H3Z"/><path d="M6 3v5h8V3M6 17v-6h8v6"/></svg>;
+}
+
 export function PreviewIcon({ active }) {
   return active
     ? <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 3h9l3 3v11H4Z"/><path d="M13 3v4h4M7 11h6M7 14h4"/></svg>
@@ -22,6 +26,6 @@ function WrapIcon({ active }) {
   return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 5h14M3 9h10a3 3 0 0 1 0 6H9"/><path d="m11 12-3 3 3 3"/>{active && <path d="M3 13h3"/>}</svg>;
 }
 
-export function DocumentToolbar({ path, previewable = false, preview = false, onTogglePreview, onOpenBeside, onDownload, downloadDisabled = false, onRefresh, wrap, onToggleWrap, children }) {
-  return <div className="cf-toolbar cf-document-toolbar"><span className="cf-ellipsis" title={path}>{path}</span>{previewable && <button className="cf-icon" type="button" aria-label={preview ? '返回源文件' : '预览文件'} title={preview ? '返回源文件' : '预览文件'} onClick={onTogglePreview}><PreviewIcon active={preview} /></button>}{previewable && onOpenBeside && <button className="cf-icon" type="button" aria-label="在侧边打开预览" title="在侧边打开预览" onClick={onOpenBeside}><SidePreviewIcon /></button>}<button className="cf-icon" type="button" aria-label="下载文件" title="下载文件" disabled={downloadDisabled} onClick={onDownload}><DownloadIcon /></button>{onRefresh && <button className="cf-icon" type="button" aria-label="重新读取文件" title="重新读取文件" onClick={onRefresh}><RefreshIcon /></button>}{onToggleWrap && <button className="cf-icon" type="button" aria-label={wrap ? '关闭自动换行' : '开启自动换行'} title={wrap ? '关闭自动换行' : '开启自动换行'} aria-pressed={wrap} onClick={onToggleWrap}><WrapIcon active={wrap} /></button>}{children}</div>;
+export function DocumentToolbar({ path, previewable = false, preview = false, onTogglePreview, onOpenBeside, onSave, saveDisabled = false, saving = false, onDownload, downloadDisabled = false, onRefresh, wrap, onToggleWrap, children }) {
+  return <div className="cf-toolbar cf-document-toolbar"><span className="cf-ellipsis" title={path}>{path}</span>{previewable && <button className="cf-icon" type="button" aria-label={preview ? '返回源文件' : '预览文件'} title={preview ? '返回源文件' : '预览文件'} onClick={onTogglePreview}><PreviewIcon active={preview} /></button>}{previewable && onOpenBeside && <button className="cf-icon" type="button" aria-label="在侧边打开预览" title="在侧边打开预览" onClick={onOpenBeside}><SidePreviewIcon /></button>}{onSave && <button className="cf-icon" type="button" aria-label={saving ? '正在保存文件' : '保存文件'} title={saving ? '保存中…' : '保存文件'} disabled={saveDisabled} onClick={onSave}><SaveIcon /></button>}<button className="cf-icon" type="button" aria-label="下载文件" title="下载文件" disabled={downloadDisabled} onClick={onDownload}><DownloadIcon /></button>{onRefresh && <button className="cf-icon" type="button" aria-label="重新读取文件" title="重新读取文件" onClick={onRefresh}><RefreshIcon /></button>}{onToggleWrap && <button className="cf-icon" type="button" aria-label={wrap ? '关闭自动换行' : '开启自动换行'} title={wrap ? '关闭自动换行' : '开启自动换行'} aria-pressed={wrap} onClick={onToggleWrap}><WrapIcon active={wrap} /></button>}{children}</div>;
 }
