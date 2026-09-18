@@ -34,6 +34,27 @@ export function findAnnotationReferences(text, maximum = Number.POSITIVE_INFINIT
   }
   return references;
 }
+export function locateConversationQuote(text, quote, source = {}) {
+  if (!text || !quote) return null;
+  const expected = Number.isInteger(source.selectionStart) ? source.selectionStart : 0;
+  const directEnd = Number.isInteger(source.selectionEnd) ? source.selectionEnd : expected + quote.length;
+  if (expected >= 0 && directEnd <= text.length && text.slice(expected, directEnd).trim() === quote) {
+    const at = text.indexOf(quote, expected);
+    if (at >= expected && at + quote.length <= directEnd) return { start: at, end: at + quote.length };
+  }
+  const before = typeof source.before === 'string' ? source.before : '';
+  const after = typeof source.after === 'string' ? source.after : '';
+  let best = null, at = text.indexOf(quote);
+  while (at >= 0) {
+    let prefix = 0, suffix = 0;
+    while (prefix < after.length && text[at + quote.length + prefix] === after[prefix]) prefix++;
+    while (suffix < before.length && at - suffix - 1 >= 0 && text[at - suffix - 1] === before[before.length - suffix - 1]) suffix++;
+    const candidate = { start: at, end: at + quote.length, context: prefix + suffix, distance: Math.abs(at - expected) };
+    if (!best || candidate.context > best.context || (candidate.context === best.context && candidate.distance < best.distance)) best = candidate;
+    at = text.indexOf(quote, at + Math.max(1, quote.length));
+  }
+  return best && { start: best.start, end: best.end };
+}
 export function createAnnotationStore(storage) {
   const states = new Map(), listeners = new Set();
   function get(sessionId) {

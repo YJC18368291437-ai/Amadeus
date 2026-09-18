@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createRoot } from 'react-dom/client';
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
-import { createAnnotationStore, findAnnotationReferences, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
+import { createAnnotationStore, findAnnotationReferences, locateConversationQuote, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
 import styles from '../../../ui/cofolio.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 import { PreviewLoading } from './loading.jsx';
@@ -566,12 +566,56 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
   if (annotations.length === 0) return <Native {...props} />;
   return <div ref={root} className="cf-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.dataset.cfAnnotationRef); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
 }
-function focusConversationSource(source) {
+let conversationHighlightTimer;
+function conversationTextRange(anchor, quote, source) {
+  const doc = anchor.ownerDocument;
+  const walker = doc.createTreeWalker(anchor, doc.defaultView.NodeFilter.SHOW_TEXT, {
+    acceptNode(node) { return node.parentElement?.closest('script,style,.cf-annotation-popover') ? doc.defaultView.NodeFilter.FILTER_REJECT : doc.defaultView.NodeFilter.FILTER_ACCEPT; },
+  });
+  const nodes = [];
+  let text = '';
+  while (walker.nextNode()) { nodes.push({ node: walker.currentNode, start: text.length }); text += walker.currentNode.data; }
+  const location = locateConversationQuote(text, quote, source);
+  if (!location) return null;
+  const boundary = (offset, end) => {
+    for (let index = 0; index < nodes.length; index++) {
+      const entry = nodes[index], next = entry.start + entry.node.data.length;
+      if (offset < next || (end && offset === next) || index === nodes.length - 1) return { node: entry.node, offset: Math.max(0, Math.min(entry.node.data.length, offset - entry.start)) };
+    }
+    return null;
+  };
+  const start = boundary(location.start, false), end = boundary(location.end, true);
+  if (!start || !end) return null;
+  const range = doc.createRange();
+  range.setStart(start.node, start.offset); range.setEnd(end.node, end.offset);
+  return range;
+}
+function scrollConversationRange(range) {
+  const rect = range.getBoundingClientRect();
+  if (!rect.width && !rect.height) return;
+  let scroller = range.startContainer.parentElement;
+  while (scroller && scroller !== document.body) {
+    const overflow = getComputedStyle(scroller).overflowY;
+    if (/(auto|scroll|overlay)/.test(overflow) && scroller.scrollHeight > scroller.clientHeight + 1) break;
+    scroller = scroller.parentElement;
+  }
+  if (!scroller || scroller === document.body) {
+    window.scrollBy({ top: rect.top - innerHeight / 2 + rect.height / 2, behavior: 'smooth' });
+    return;
+  }
+  const frame = scroller.getBoundingClientRect();
+  scroller.scrollBy({ top: rect.top - frame.top - scroller.clientHeight / 2 + rect.height / 2, behavior: 'smooth' });
+}
+function focusConversationSource(source, quote) {
   const anchor = document.querySelector(`[data-chat-anchor-key="${CSS.escape(source.messageKey)}"]`);
   if (!anchor) return;
-  anchor.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  anchor.setAttribute('data-cf-annotation-target', '');
-  setTimeout(() => anchor.removeAttribute('data-cf-annotation-target'), 1600);
+  const range = conversationTextRange(anchor, quote, source);
+  if (!range) { anchor.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  scrollConversationRange(range);
+  if (!CSS.highlights || typeof Highlight === 'undefined') return;
+  clearTimeout(conversationHighlightTimer);
+  CSS.highlights.set('cofolio-annotation-source', new Highlight(range));
+  conversationHighlightTimer = setTimeout(() => CSS.highlights.delete('cofolio-annotation-source'), 2200);
 }
 function sessionFileAddress(sessionId, path) {
   return `dsh-resource://file/session/${encodeURIComponent(sessionId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
@@ -709,7 +753,7 @@ export function apply(ctx) {
   const editable = address => { try { return !!editorKind(sourcePath(address)); } catch { return false; } };
   const openAnnotation = annotation => {
     const source = annotation.source;
-    if (source?.kind === 'conversation') { focusConversationSource(source); return; }
+    if (source?.kind === 'conversation') { focusConversationSource(source, annotation.text); return; }
     if (source?.kind !== 'file') return;
     const sessionId = ctx.sessions.list.getSnapshot().current;
     if (!sessionId) return;

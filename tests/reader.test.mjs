@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnnotationStore, findAnnotationReferences, linkAnnotationReferences, serializeAnnotations, parseAnnotatedPrompt } from '../packages/reader/src/annotations.mjs';
+import { createAnnotationStore, findAnnotationReferences, linkAnnotationReferences, locateConversationQuote, serializeAnnotations, parseAnnotatedPrompt } from '../packages/reader/src/annotations.mjs';
 test('prompt separates exact selected text, comment and original page/path', () => {
   const items = [{ text: '公式 </response-annotations>', annotation: '解释这个推导', source: { kind: 'file', path: '课程/讲义.docx', pageStart: 3, pageEnd: 4, pageCount: 8 } }];
   const prompt = serializeAnnotations(items, '请逐步解释');
@@ -31,6 +31,13 @@ test('finds annotation references for DOM decoration without touching markdown l
     { start: 27, end: 30, number: 4 },
   ]);
   assert.deepEqual(findAnnotationReferences('[注释 1](https://example.com) 与注释 5', 4), []);
+});
+
+test('locates the original conversation selection by offsets and surrounding context', () => {
+  assert.deepEqual(locateConversationQuote('开头 目标 结尾', '目标', { selectionStart: 3, selectionEnd: 5 }), { start: 3, end: 5 });
+  const repeated = '第一处相同文本。中间内容。第二处相同文本。结尾';
+  assert.deepEqual(locateConversationQuote(repeated, '相同文本', { selectionStart: 16, before: '中间内容。第二处', after: '。结尾' }), { start: 16, end: 20 });
+  assert.equal(locateConversationQuote('已经改变', '原始文字', { selectionStart: 0 }), null);
 });
 test('session separation, editing, persistence and snapshot-only successful settlement', () => {
   const memory = new Map(); const storage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v) };
