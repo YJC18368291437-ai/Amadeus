@@ -8,7 +8,7 @@ import { createOnlyOffice } from '../packages/reader/src/onlyoffice.mjs';
 import { createConverter } from '../packages/reader/src/convert.mjs';
 
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cofolio-builder-test-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'amadeus-builder-test-'));
   const preload = path.join(root, 'mock.cjs');
   await writeFile(preload, `const fs = require('node:fs'); let content;
 global.builder = {
@@ -71,9 +71,9 @@ test('missing builder and invalid output fail without a reusable PDF', async t =
   finally { await converter.dispose(); }
 });
 
-test('real ONLYOFFICE converts PPTX and DOCX with selectable text and persistent cache', { skip: !process.env.COFOLIO_TEST_ONLYOFFICE, timeout: 180000 }, async t => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cofolio-real-builder-'));
-  const converter = createConverter({ mode: process.env.COFOLIO_TEST_ONLYOFFICE, executable: process.env.COFOLIO_TEST_BUILDER || 'docbuilder', cacheDir: root });
+test('real ONLYOFFICE converts PPTX and DOCX with selectable text and persistent cache', { skip: !process.env.AMADEUS_TEST_ONLYOFFICE, timeout: 180000 }, async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'amadeus-real-builder-'));
+  const converter = createConverter({ mode: process.env.AMADEUS_TEST_ONLYOFFICE, executable: process.env.AMADEUS_TEST_BUILDER || 'docbuilder', cacheDir: root });
   t.after(async () => { await converter.dispose(); assert.ok(root.startsWith(path.resolve(os.tmpdir()) + path.sep)); await rm(root, { recursive: true, force: true, maxRetries: 5 }); });
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
   for (const name of ['lecture.pptx', 'lecture.docx']) {
@@ -83,7 +83,7 @@ test('real ONLYOFFICE converts PPTX and DOCX with selectable text and persistent
     const document = await task.promise;
     assert.equal(document.numPages, 2);
     const text = (await (await document.getPage(1)).getTextContent()).items.map(item => item.str).join(' ');
-    assert.match(text, /CoFolio/);
+    assert.match(text, /Amadeus/);
     assert.doesNotMatch(text, /unregistered\s+version|evaluation\s+only/i, 'Use a licensed Builder or the community DocumentServer converter; trial outputs are not release-ready');
     await task.destroy();
     assert.equal(await converter.convert(source), pdf);

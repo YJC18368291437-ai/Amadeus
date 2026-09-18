@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAuth, sameOrigin } from '../packages/login/src/auth.mjs';
 const credentials = { username: 'reader', password: 'correct:secret' };
-const headers = { host: 'cofolio.example:443', authorization: 'Basic ' + Buffer.from('reader:correct:secret').toString('base64') };
+const headers = { host: 'amadeus.example:443', authorization: 'Basic ' + Buffer.from('reader:correct:secret').toString('base64') };
 test('Basic challenge, wrong password, remote same-origin and signed WS session', () => {
   const auth = createAuth(credentials);
-  assert.equal(auth.rejection({ headers: { host: 'cofolio.example:443' } }), 401);
+  assert.equal(auth.rejection({ headers: { host: 'amadeus.example:443' } }), 401);
   assert.equal(auth.rejection({ headers }), undefined);
   assert.equal(auth.rejection({ headers: { ...headers, authorization: 'Basic invalid' } }), 401);
   let cookie;

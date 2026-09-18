@@ -59,8 +59,8 @@ assert.match(response.headers['content-disposition'], /lecture\.pdf/);
 
 - [ ] **Step 1: Vendor the unmodified SwiftLaTeX v20022022 worker JS/WASM assets, license, and source URL metadata for XeTeX and dvipdfmx.**
 - [ ] **Step 2: Copy those assets into `packages/reader/dist/assets/tex` during build and serve them through the authenticated reader-assets route.**
-- [ ] **Step 3: Implement a browser engine wrapper that starts both workers, points them at `/cofolio/texlive/`, writes `main.tex`, runs XeTeX to XDV, then dvipdfmx to PDF bytes.**
-- [ ] **Step 4: Add an allowlisted `/cofolio/texlive/xetex/<format>/<filename>` proxy that resolves installed TeX Live files with `kpsewhich`, forwards `200/fileid` and `301 not-found` semantics, and caches successful immutable files under the CoFolio cache directory.**
+- [ ] **Step 3: Implement a browser engine wrapper that starts both workers, points them at `/amadeus/texlive/`, writes `main.tex`, runs XeTeX to XDV, then dvipdfmx to PDF bytes.**
+- [ ] **Step 4: Add an allowlisted `/amadeus/texlive/xetex/<format>/<filename>` proxy that resolves installed TeX Live files with `kpsewhich`, forwards `200/fileid` and `301 not-found` semantics, and caches successful immutable files under the Amadeus cache directory.**
 - [ ] **Step 5: Add proxy tests for path sanitization, cache hits, status forwarding, size/time limits, and upstream failures.**
 - [ ] **Step 6: Run focused tests/build and commit with `git commit -m "feat: add browser XeTeX runtime"`.**
 
@@ -88,8 +88,8 @@ assert.match(response.headers['content-disposition'], /lecture\.pdf/);
 - Modify: `packages/reader/src/editor.css`
 - Modify: `packages/reader/src/preview.css`
 
-- [ ] **Step 1: Add an icon-only download action before existing right-side controls for every CoFolio-owned text and paged document toolbar.**
-- [ ] **Step 2: For PDF/Word/PowerPoint, download `/cofolio/preview?download=1`; for ordinary text source mode, download `/cofolio/files/download`; for Markdown preview, print; for LaTeX preview, download the generated PDF.**
+- [ ] **Step 1: Add an icon-only download action before existing right-side controls for every Amadeus-owned text and paged document toolbar.**
+- [ ] **Step 2: For PDF/Word/PowerPoint, download `/amadeus/preview?download=1`; for ordinary text source mode, download `/amadeus/files/download`; for Markdown preview, print; for LaTeX preview, download the generated PDF.**
 - [ ] **Step 3: Add a preview/source icon immediately to the left of download for `.md`, `.markdown`, and `.tex`.**
 - [ ] **Step 4: Use 16px stroke SVG icons, native focus/hover states, title and ARIA labels, with no visible annotation copy.**
 - [ ] **Step 5: Run `npm test`, `npm run build`, and browser checks in light/dark themes at 375, 1024, and 1440 widths.**
@@ -102,6 +102,6 @@ assert.match(response.headers['content-disposition'], /lecture\.pdf/);
 
 - [ ] **Step 1: Run unit/integration tests, browser flows, real ONLYOFFICE conversion, Markdown print invocation, XeTeX `ctexart` Chinese compile, and TikZ compile.**
 - [ ] **Step 2: Push the feature branch without creating a tag or GitHub Release.**
-- [ ] **Step 3: Back up `/opt/cofolio`, deploy the exact commit, build/test, restart `deepseek-harness.service`, and verify HTTP 200.**
+- [ ] **Step 3: Back up `/opt/amadeus`, deploy the exact commit, build/test, restart `deepseek-harness.service`, and verify HTTP 200.**
 - [ ] **Step 4: Change the server Basic Auth password to the user-specified value only after feature deployment, restart, and verify old credentials fail while new credentials succeed.**
 - [ ] **Step 5: Leave the feature branch unmerged until user acceptance.**

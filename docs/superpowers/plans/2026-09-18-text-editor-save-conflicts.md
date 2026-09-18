@@ -4,7 +4,7 @@
 
 **Goal:** Replace native previews for UTF-8 workspace text files with a CodeMirror editor that saves atomically, synchronizes duplicate tabs, marks dirty tabs, and resolves optimistic-write conflicts.
 
-**Architecture:** Add a CoFolio text source/save HTTP API whose version token comes from the same filesystem stat used by the atomic writer. A browser document store keyed by full resource address owns base text, draft text, server version, dirty state, conflict state, and subscriptions; CodeMirror views and tab titles are projections of this store.
+**Architecture:** Add a Amadeus text source/save HTTP API whose version token comes from the same filesystem stat used by the atomic writer. A browser document store keyed by full resource address owns base text, draft text, server version, dirty state, conflict state, and subscriptions; CodeMirror views and tab titles are projections of this store.
 
 **Tech Stack:** Node.js 24, React 18, CodeMirror 6, `@codemirror/merge`, existing Cordis/dsh slots, Node test runner.
 
@@ -29,7 +29,7 @@ assert.equal((await saveTextSource(root, 'notes.md', 'changed', loaded.version))
 - [ ] **Step 2: Run `node --test tests/source-save.test.mjs`; expect module-not-found failure.**
 - [ ] **Step 3: Implement `readTextSource()` using `resolveWithin`, strict UTF-8 decoding, NUL rejection, and `versionOf()`.**
 - [ ] **Step 4: Implement `saveTextSource()` through the existing atomic upload lock with `expectedVersion`; return `409` with `version` when the server changed.**
-- [ ] **Step 5: Register `GET /cofolio/files/source` and `PUT /cofolio/files/source`, both capped at 5 MiB and scoped to the session workspace.**
+- [ ] **Step 5: Register `GET /amadeus/files/source` and `PUT /amadeus/files/source`, both capped at 5 MiB and scoped to the session workspace.**
 - [ ] **Step 6: Run `node --test tests/source-save.test.mjs tests/files.test.mjs`; expect all tests to pass.**
 - [ ] **Step 7: Commit with `git commit -m "feat: add versioned text source saves"`.**
 

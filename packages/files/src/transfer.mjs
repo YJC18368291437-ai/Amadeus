@@ -27,7 +27,7 @@ export async function upload(root, input, stream, { maxBytes = 1024 ** 3, overwr
     if (!info && overwriteVersion) throw new HttpError(409, 'The file changed before replacement');
   };
   await check();
-  const temp = path.join(path.dirname(target), `.cofolio-upload-${randomUUID()}`);
+  const temp = path.join(path.dirname(target), `.amadeus-upload-${randomUUID()}`);
   let bytes = 0;
   try {
     await pipeline(stream, new Transform({ transform(chunk, encoding, done) {
@@ -52,7 +52,7 @@ export async function zipDirectory(root, target, { maxEntries = 100000 } = {}) {
   async function scan(folder, relative) {
     for (const entry of await readdir(folder, { withFileTypes: true })) {
       if (entries.length >= maxEntries) throw new HttpError(413, 'Too many files for a single ZIP download');
-      if (entry.name.startsWith('.cofolio-upload-')) continue;
+      if (entry.name.startsWith('.amadeus-upload-')) continue;
       const full = await resolveWithin(root, path.join(folder, entry.name));
       const name = path.posix.join(relative, entry.name);
       if (entry.isDirectory()) { entries.push({ name: name + '/' }); await scan(full, name); }

@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { createTexliveProxy } from '../packages/reader/src/texlive-proxy.mjs';
 
 test('TeX Live proxy validates requests, caches successes and preserves not-found', async t => {
-  const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'cofolio-texlive-'));
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'amadeus-texlive-'));
   t.after(() => rm(cacheDir, { recursive: true, force: true }));
   let calls = 0;
   const fetchImpl = async url => {
@@ -26,7 +26,7 @@ test('TeX Live proxy validates requests, caches successes and preserves not-foun
 });
 
 test('TeX Live proxy rejects oversized and invalid upstream responses', async t => {
-  const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'cofolio-texlive-'));
+  const cacheDir = await mkdtemp(path.join(os.tmpdir(), 'amadeus-texlive-'));
   t.after(() => rm(cacheDir, { recursive: true, force: true }));
   await assert.rejects(createTexliveProxy({ cacheDir, kpsewhich: null, maxBytes: 2, fetchImpl: async () => new Response('large', { headers: { fileid: 'x.sty' } }) }).fetchFile('xetex/1/x.sty'), error => error.status === 413);
   await assert.rejects(createTexliveProxy({ cacheDir, kpsewhich: null, fetchImpl: async () => new Response('ok') }).fetchFile('xetex/1/y.sty'), error => error.status === 502);

@@ -11,10 +11,10 @@ export function parseEditableAddress(address) {
 
 export function sourceRequestUrl(address, extra = {}) {
   const { sessionId, path } = parseEditableAddress(address);
-  return `/cofolio/files/source?${new URLSearchParams({ session: sessionId, path, ...extra })}`;
+  return `/amadeus/files/source?${new URLSearchParams({ session: sessionId, path, ...extra })}`;
 }
 
 export function sourceDownloadUrl(address) {
   const { sessionId, path } = parseEditableAddress(address);
-  return `/cofolio/files/download?${new URLSearchParams({ session: sessionId, path })}`;
+  return `/amadeus/files/download?${new URLSearchParams({ session: sessionId, path })}`;
 }

@@ -59,7 +59,7 @@
 ### Task 5: Full-height preview and page-control polish
 
 **Files:**
-- Modify: `ui/cofolio.css`
+- Modify: `ui/amadeus.css`
 - Modify: `ui/dsh-theme.css`
 - Modify: `packages/reader/src/page-control.css`
 
@@ -75,5 +75,5 @@
 
 - [x] Run `npm test`; expect all environment-independent tests to pass and only the opt-in real ONLYOFFICE test to skip.
 - [x] Run `npm run build`; expect all four plugin bundles and PDF.js assets to build.
-- [ ] Launch CoFolio locally and inspect PDF/DOCX/PPTX preview height, scroll ownership, live page number, toolbar order, annotation-only sending, reload, and tab-switch reuse.
+- [ ] Launch Amadeus locally and inspect PDF/DOCX/PPTX preview height, scroll ownership, live page number, toolbar order, annotation-only sending, reload, and tab-switch reuse.
 - [x] Run `git diff --check` and review the final diff for unrelated changes.

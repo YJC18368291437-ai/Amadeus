@@ -26,8 +26,8 @@ export function LatexPreview({ source, path, compiler, downloadRef, onReady, ren
     return () => { clearTimeout(timer); generation.current++; };
   }, [compiler, downloadRef, onReady, path, source]);
   useEffect(() => () => { if (currentUrl.current) URL.revokeObjectURL(currentUrl.current); }, []);
-  if (state.phase === 'error') return <pre className="cf-tex-error" role="alert">{state.error}</pre>;
-  if (state.phase === 'compiling') return <div className="cf-editor-loading" role="status">正在编译… 首次编译需要下载组件，可能较慢。</div>;
-  if (!state.url) return <div className="cf-editor-loading" role="status">等待编译…</div>;
-  return renderPdf ? renderPdf(state.pdf) : <iframe className="cf-latex-preview" title={`${path} PDF 预览`} src={state.url} />;
+  if (state.phase === 'error') return <pre className="amadeus-tex-error" role="alert">{state.error}</pre>;
+  if (state.phase === 'compiling') return <div className="amadeus-editor-loading" role="status">正在编译… 首次编译需要下载组件，可能较慢。</div>;
+  if (!state.url) return <div className="amadeus-editor-loading" role="status">等待编译…</div>;
+  return renderPdf ? renderPdf(state.pdf) : <iframe className="amadeus-latex-preview" title={`${path} PDF 预览`} src={state.url} />;
 }

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
 import { createAnnotationStore, findAnnotationReferences, locateConversationQuote, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
-import styles from '../../../ui/cofolio.css';
+import styles from '../../../ui/amadeus.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 import { PreviewLoading } from './loading.jsx';
 import loadingStyles from './loading.css';
@@ -20,21 +20,21 @@ import { DownloadIcon } from './document-toolbar.jsx';
 import { createTexCompiler } from './tex-engine.mjs';
 import editorStyles from './editor.css';
 import previewStyles from './preview.css';
-import { cofolioKatexCss } from './markdown-preview.jsx';
+import { amadeusKatexCss } from './markdown-preview.jsx';
 import { RenderedPreviewTab } from './rendered-preview-tab.jsx';
 import { useCtrlWheelZoom } from './wheel-zoom.jsx';
 import { clampZoom, pinchZoomScale } from './zoom.mjs';
 import brandMark from '../assets/amadeus-brand-mark.png';
 
 export const inject = ['slots', 'documentPreviews', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
-const ASSETS = '/cofolio/reader-assets/';
+const ASSETS = '/amadeus/reader-assets/';
 GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
 function AmadeusBrandMark({ size = 24, className }) {
   const mask = `url("${brandMark}") center / contain no-repeat`;
   return <span className={className} aria-hidden="true" style={{ display: 'block', width: size, height: size, flex: 'none', color: 'inherit', backgroundColor: 'currentColor', WebkitMask: mask, mask }} />;
 }
 function AmadeusBrandName() { return <span>Amadeus</span>; }
-function DirtyDot() { return <svg className="cf-dirty-dot" width="8" height="8" viewBox="0 0 8 8" aria-label="未保存"><circle cx="4" cy="4" r="3.5" fill="currentColor" /></svg>; }
+function DirtyDot() { return <svg className="amadeus-dirty-dot" width="8" height="8" viewBox="0 0 8 8" aria-label="未保存"><circle cx="4" cy="4" r="3.5" fill="currentColor" /></svg>; }
 function replaceBrandSlot(ctx, name, Replacement) {
   let entry, Native;
   const install = () => {
@@ -178,9 +178,9 @@ function PdfPage({ pdf, number, scale, baseSize, path, format, sessionId, onRend
     })().catch(error => { if (!cancelled && error.name !== 'RenderingCancelledException') { setError(error.message); onRendered?.(number, error); } });
     return () => { cancelled = true; renderTask?.cancel(); layer?.cancel(); };
   }, [pdf, number, scale, near, onRendered]);
-  return <><div ref={holder} className="cf-pdf-page" style={{ ...size, '--scale-factor': scale, '--total-scale-factor': scale }} data-cf-path={path} data-cf-format={format} data-cf-page={number} data-cf-page-count={pdf.numPages} data-cf-session={sessionId}>
-    <canvas ref={canvas} /><div ref={text} className="textLayer" />{error && <p className="cf-error">{error}</p>}
-  </div><div className="cf-page-label" style={{ width: size.width }}>第 {number} 页</div></>;
+  return <><div ref={holder} className="amadeus-pdf-page" style={{ ...size, '--scale-factor': scale, '--total-scale-factor': scale }} data-amadeus-path={path} data-amadeus-format={format} data-amadeus-page={number} data-amadeus-page-count={pdf.numPages} data-amadeus-session={sessionId}>
+    <canvas ref={canvas} /><div ref={text} className="textLayer" />{error && <p className="amadeus-error">{error}</p>}
+  </div><div className="amadeus-page-label" style={{ width: size.width }}>第 {number} 页</div></>;
 }
 
 async function inspectPdfPages(pdf, signal) {
@@ -201,7 +201,7 @@ async function inspectPdfPages(pdf, signal) {
 
 async function loadPdfPreview({ sessionId, path, format, signal, report }) {
   report({ phase: 'prepare' });
-  const response = await fetch(`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`, { signal });
+  const response = await fetch(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`, { signal });
   if (!response.ok) throw new Error((await response.json()).error);
   const metadata = await response.json();
   report({ phase: format === 'pdf' ? 'download' : 'convert' });
@@ -285,7 +285,7 @@ function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange, focusPa
     const container = scroll.current;
     if (!preview || !container) { pageGeometry.current = []; return; }
     const viewport = container.getBoundingClientRect();
-    pageGeometry.current = [...container.querySelectorAll('[data-cf-page]')].map(element => {
+    pageGeometry.current = [...container.querySelectorAll('[data-amadeus-page]')].map(element => {
       const rect = element.getBoundingClientRect();
       const top = container.scrollTop + rect.top - viewport.top;
       return { page: Number(element.dataset.cfPage), top, bottom: top + rect.height };
@@ -312,8 +312,8 @@ function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange, focusPa
       setPage(previous => previous === next ? previous : next);
     });
   }
-  if (error) return <p className="cf-error" role="alert">{error}</p>;
-  return <div className="cf-pdf-scroll cf-generated-pdf" ref={scroll} onScroll={onScroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
+  if (error) return <p className="amadeus-error" role="alert">{error}</p>;
+  return <div className="amadeus-pdf-scroll amadeus-generated-pdf" ref={scroll} onScroll={onScroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
 }
 
 function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible, focusPage, focusRevision }) {
@@ -330,11 +330,11 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible,
     const host = root.current?.parentElement;
     const pane = host?.parentElement;
     if (!host || !pane) return;
-    host.setAttribute('data-cf-reader-host', '');
-    pane.setAttribute('data-cf-reader-pane', '');
+    host.setAttribute('data-amadeus-reader-host', '');
+    pane.setAttribute('data-amadeus-reader-pane', '');
     return () => {
-      host.removeAttribute('data-cf-reader-host');
-      pane.removeAttribute('data-cf-reader-pane');
+      host.removeAttribute('data-amadeus-reader-host');
+      pane.removeAttribute('data-amadeus-reader-pane');
     };
   }, []);
   useEffect(() => {
@@ -374,7 +374,7 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible,
       if (stopped || running || document.visibilityState !== 'visible') return;
       running = true;
       try {
-        const response = await fetch(`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`);
+        const response = await fetch(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`);
         if (!response.ok) throw new Error((await response.json()).error);
         const metadata = await response.json();
         if (!stopped && metadata.version !== preview.version) {
@@ -399,7 +399,7 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible,
     const container = scroll.current;
     if (!preview || !container) { pageGeometry.current = []; return; }
     const viewport = container.getBoundingClientRect();
-    pageGeometry.current = [...container.querySelectorAll('[data-cf-page]')].map(element => {
+    pageGeometry.current = [...container.querySelectorAll('[data-amadeus-page]')].map(element => {
       const rect = element.getBoundingClientRect();
       const top = container.scrollTop + rect.top - viewport.top;
       return { page: Number(element.dataset.cfPage), top, bottom: top + rect.height };
@@ -443,16 +443,16 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible,
   }, [page]);
   useCtrlWheelZoom(scroll, zoom);
   usePdfPinchZoom(scroll, scale, pinchZoom);
-  return <section ref={root} className="cf-reader">
-    <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><a className="cf-icon" href={`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
-    {error && <p className="cf-error" role="alert">{error}</p>}
+  return <section ref={root} className="amadeus-reader">
+    <div className="amadeus-toolbar"><span className="amadeus-ellipsis" title={path}>{path}</span><a className="amadeus-icon" href={`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="amadeus-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="amadeus-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
+    {error && <p className="amadeus-error" role="alert">{error}</p>}
     {!firstReady && !error && <PreviewLoading key={`${resourceAddress}:${attempt}`} {...progress} office={format !== 'pdf'} />}
-    <div className="cf-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
+    <div className="amadeus-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
   </section>;
 }
 function PagedTab({ useTabInfo, sessionId, cache }) {
   const { tab } = useTabInfo();
-  const focus = tab.navigation.params?.cofolioAnnotation;
+  const focus = tab.navigation.params?.amadeusAnnotation;
   return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} cache={cache} visible={tab.visible} focusPage={focus?.page} focusRevision={tab.navigation.revision} />;
 }
 const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
@@ -467,16 +467,16 @@ function AnnotationChip({ annotations }) {
   }
   function leave() { timer.current = setTimeout(() => setExpanded(false), 80); }
   useEffect(() => () => clearTimeout(timer.current), []);
-  return <div className="cf-sent-summary"><button ref={anchor} className="cf-summary-chip cf-sent-chip" aria-label={`查看 ${annotations.length} 条已发送注释`} aria-expanded={expanded} onMouseEnter={reveal} onMouseLeave={leave} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{annotations.length} 条注释</button>
-    {expanded && <div className="cf-annotation-popover cf-sent-popover" style={position} role="region" aria-label="已发送注释详情" onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}><div className="cf-annotation-list">{annotations.map((item, index) => <article key={index} className="cf-hover-note"><span className="cf-note-number">{index + 1}。</span><div className="cf-note-copy"><span className="cf-note-label">所选文本：</span><blockquote>{denseText(item.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div></div>}
+  return <div className="amadeus-sent-summary"><button ref={anchor} className="amadeus-summary-chip amadeus-sent-chip" aria-label={`查看 ${annotations.length} 条已发送注释`} aria-expanded={expanded} onMouseEnter={reveal} onMouseLeave={leave} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{annotations.length} 条注释</button>
+    {expanded && <div className="amadeus-annotation-popover amadeus-sent-popover" style={position} role="region" aria-label="已发送注释详情" onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}><div className="amadeus-annotation-list">{annotations.map((item, index) => <article key={index} className="amadeus-hover-note"><span className="amadeus-note-number">{index + 1}。</span><div className="amadeus-note-copy"><span className="amadeus-note-label">所选文本：</span><blockquote>{denseText(item.text)}</blockquote><span className="amadeus-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div></div>}
   </div>;
 }
 function SentAnnotations({ node, renderMessageImages }) {
-  const { annotations, prompt } = node.data.cofolio;
+  const { annotations, prompt } = node.data.amadeus;
   const attachments = node.data.content.filter(block => ['image', 'file'].includes(block.type) && block.attachment);
-  return <section className="cf-sent" aria-label="已发送的注释">
+  return <section className="amadeus-sent" aria-label="已发送的注释">
     <AnnotationChip annotations={annotations} />
-    {(prompt || attachments.length > 0) && <div className="cf-sent-message">
+    {(prompt || attachments.length > 0) && <div className="amadeus-sent-message">
     {prompt && <p style={{ whiteSpace: 'pre-wrap' }}>{prompt}</p>}
     {attachments.filter(b => b.type === 'image').map((b, index) => <React.Fragment key={index}>{renderMessageImages({ images: [{ attachment: b.attachment }], align: 'end', compact: true })}</React.Fragment>)}
     {attachments.filter(b => b.type === 'file').map((b, index) => <span key={index}>附件：{b.attachment.name}</span>)}
@@ -489,7 +489,7 @@ function annotationEnvelope(node) {
   return parseAnnotatedPrompt(text);
 }
 function AssistantAnnotationPopover({ annotation, number, position, onEnter, onLeave }) {
-  return <div className="cf-annotation-popover cf-annotation-reference-popover" style={position} role="tooltip" onMouseEnter={onEnter} onMouseLeave={onLeave}><div className="cf-annotation-list"><article className="cf-hover-note"><span className="cf-note-number">{number}。</span><div className="cf-note-copy"><span className="cf-note-label">所选文本：</span><blockquote>{denseText(annotation.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{annotation.annotation || '（无）'}</p>{annotation.source?.kind === 'file' && <small className="cf-note-source">{annotation.source.path}{annotation.source.pageStart ? ` · 第 ${annotation.source.pageStart} 页` : ''}</small>}</div></article></div></div>;
+  return <div className="amadeus-annotation-popover amadeus-annotation-reference-popover" style={position} role="tooltip" onMouseEnter={onEnter} onMouseLeave={onLeave}><div className="amadeus-annotation-list"><article className="amadeus-hover-note"><span className="amadeus-note-number">{number}。</span><div className="amadeus-note-copy"><span className="amadeus-note-label">所选文本：</span><blockquote>{denseText(annotation.text)}</blockquote><span className="amadeus-note-label">用户评论：</span><p>{annotation.annotation || '（无）'}</p>{annotation.source?.kind === 'file' && <small className="amadeus-note-source">{annotation.source.path}{annotation.source.pageStart ? ` · 第 ${annotation.source.pageStart} 页` : ''}</small>}</div></article></div></div>;
 }
 function decorateAnnotationReferences(root, maximum) {
   if (!root || maximum < 1) return;
@@ -499,7 +499,7 @@ function decorateAnnotationReferences(root, maximum) {
   while (walker.nextNode()) textNodes.push(walker.currentNode);
   for (const textNode of textNodes) {
     const parent = textNode.parentElement;
-    if (!parent || parent.closest('a,button,code,pre,kbd,samp,script,style,textarea,input,.cf-annotation-popover,[data-cf-annotation-ref]')) continue;
+    if (!parent || parent.closest('a,button,code,pre,kbd,samp,script,style,textarea,input,.amadeus-annotation-popover,[data-amadeus-annotation-ref]')) continue;
     const references = findAnnotationReferences(textNode.data, maximum);
     if (references.length === 0) continue;
     const fragment = doc.createDocumentFragment();
@@ -508,7 +508,7 @@ function decorateAnnotationReferences(root, maximum) {
       if (reference.start > offset) fragment.append(textNode.data.slice(offset, reference.start));
       const button = doc.createElement('button');
       button.type = 'button';
-      button.className = 'cf-annotation-reference';
+      button.className = 'amadeus-annotation-reference';
       button.dataset.cfAnnotationRef = String(reference.number);
       button.setAttribute('aria-label', `查看注释 ${reference.number}`);
       button.textContent = `注释 ${reference.number}`;
@@ -535,7 +535,7 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
   const root = useRef();
   const [popover, setPopover] = useState(null);
   const hideTimer = useRef();
-  const reference = target => target instanceof Element ? target.closest('[data-cf-annotation-ref]') : null;
+  const reference = target => target instanceof Element ? target.closest('[data-amadeus-annotation-ref]') : null;
   const reveal = anchor => {
     const number = Number(anchor.dataset.cfAnnotationRef);
     const annotation = annotations[number - 1];
@@ -564,13 +564,13 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
     return () => observer.disconnect();
   }, [annotations.length, props.node]);
   if (annotations.length === 0) return <Native {...props} />;
-  return <div ref={root} className="cf-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.dataset.cfAnnotationRef); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
+  return <div ref={root} className="amadeus-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.dataset.cfAnnotationRef); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
 }
 let conversationHighlightTimer;
 function conversationTextRange(anchor, quote, source) {
   const doc = anchor.ownerDocument;
   const walker = doc.createTreeWalker(anchor, doc.defaultView.NodeFilter.SHOW_TEXT, {
-    acceptNode(node) { return node.parentElement?.closest('script,style,.cf-annotation-popover') ? doc.defaultView.NodeFilter.FILTER_REJECT : doc.defaultView.NodeFilter.FILTER_ACCEPT; },
+    acceptNode(node) { return node.parentElement?.closest('script,style,.amadeus-annotation-popover') ? doc.defaultView.NodeFilter.FILTER_REJECT : doc.defaultView.NodeFilter.FILTER_ACCEPT; },
   });
   const nodes = [];
   let text = '';
@@ -614,8 +614,8 @@ function focusConversationSource(source, quote) {
   scrollConversationRange(range);
   if (!CSS.highlights || typeof Highlight === 'undefined') return;
   clearTimeout(conversationHighlightTimer);
-  CSS.highlights.set('cofolio-annotation-source', new Highlight(range));
-  conversationHighlightTimer = setTimeout(() => CSS.highlights.delete('cofolio-annotation-source'), 2200);
+  CSS.highlights.set('amadeus-annotation-source', new Highlight(range));
+  conversationHighlightTimer = setTimeout(() => CSS.highlights.delete('amadeus-annotation-source'), 2200);
 }
 function sessionFileAddress(sessionId, path) {
   return `dsh-resource://file/session/${encodeURIComponent(sessionId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
@@ -645,16 +645,16 @@ function AnnotationDock({ sessionId, store, useInput, inputActions }) {
     const slot = summary.current?.closest('[data-slot="conversation.input.overlay"]');
     const card = slot?.parentElement?.parentElement;
     if (!card?.querySelector('[contenteditable="true"]')) return;
-    card.setAttribute('data-cf-annotation-input', '');
-    return () => card.removeAttribute('data-cf-annotation-input');
+    card.setAttribute('data-amadeus-annotation-input', '');
+    return () => card.removeAttribute('data-amadeus-annotation-input');
   }, [items.length > 0]);
-  return <><div className="cf-annotations cf-annotation-summary" aria-label="待发送注释">{items.length > 0 && <>
-    <div className="cf-summary-pill" onMouseEnter={reveal} onMouseLeave={leave}><button ref={summary} className="cf-summary-chip" aria-label={`${items.length} 条注释`} aria-expanded={expanded} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{items.length} 条注释</button><button className="cf-clear-notes" aria-label="清除全部注释" title="清除全部注释" onClick={() => { store.clear(sessionId); setExpanded(false); }}>×</button></div>
-    {expanded && <div className="cf-annotation-popover" style={position} role="region" aria-label="全部注释" onMouseEnter={() => clearTimeout(hideTimer.current)} onMouseLeave={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}>
-      <div className="cf-annotation-list">{items.map((item, index) => <article key={item.id} className="cf-hover-note"><span className="cf-note-number">{index + 1}。</span><div className="cf-note-copy"><div className="cf-hover-note-title"><span>所选文本：</span><button className="cf-icon" aria-label={`编辑注释 ${index + 1}`} title="编辑" onClick={() => { setEditing(item.id); setComment(item.annotation); setExpanded(false); setPinned(false); }}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="m12.5 3.5 4 4M3 17l1-5L13.5 2.5a2.8 2.8 0 0 1 4 4L8 16Z"/></svg></button><button className="cf-icon" aria-label={`删除注释 ${index + 1}`} title="删除" onClick={() => store.remove(sessionId, item.id)}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12M8 8v6M12 8v6"/></svg></button></div><blockquote>{denseText(item.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div>
+  return <><div className="amadeus-annotations amadeus-annotation-summary" aria-label="待发送注释">{items.length > 0 && <>
+    <div className="amadeus-summary-pill" onMouseEnter={reveal} onMouseLeave={leave}><button ref={summary} className="amadeus-summary-chip" aria-label={`${items.length} 条注释`} aria-expanded={expanded} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{items.length} 条注释</button><button className="amadeus-clear-notes" aria-label="清除全部注释" title="清除全部注释" onClick={() => { store.clear(sessionId); setExpanded(false); }}>×</button></div>
+    {expanded && <div className="amadeus-annotation-popover" style={position} role="region" aria-label="全部注释" onMouseEnter={() => clearTimeout(hideTimer.current)} onMouseLeave={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}>
+      <div className="amadeus-annotation-list">{items.map((item, index) => <article key={item.id} className="amadeus-hover-note"><span className="amadeus-note-number">{index + 1}。</span><div className="amadeus-note-copy"><div className="amadeus-hover-note-title"><span>所选文本：</span><button className="amadeus-icon" aria-label={`编辑注释 ${index + 1}`} title="编辑" onClick={() => { setEditing(item.id); setComment(item.annotation); setExpanded(false); setPinned(false); }}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="m12.5 3.5 4 4M3 17l1-5L13.5 2.5a2.8 2.8 0 0 1 4 4L8 16Z"/></svg></button><button className="amadeus-icon" aria-label={`删除注释 ${index + 1}`} title="删除" onClick={() => store.remove(sessionId, item.id)}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12M8 8v6M12 8v6"/></svg></button></div><blockquote>{denseText(item.text)}</blockquote><span className="amadeus-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div>
     </div>}
   </>}</div>
-  <Modal open={!!selected} title="编辑注释" closeLabel="关闭" onClose={() => setEditing(null)} className="cf-modal" footer={<div className="cf-modal-actions"><Button onClick={() => setEditing(null)}>取消</Button><Button variant="primary" onClick={() => { store.update(sessionId, editing, comment); setEditing(null); }}>保存</Button></div>}>{selected && <div className="cf-annotation-editor"><textarea autoFocus aria-label="修改注释的问题" value={comment} onChange={e => setComment(e.target.value)} /></div>}</Modal></>;
+  <Modal open={!!selected} title="编辑注释" closeLabel="关闭" onClose={() => setEditing(null)} className="amadeus-modal" footer={<div className="amadeus-modal-actions"><Button onClick={() => setEditing(null)}>取消</Button><Button variant="primary" onClick={() => { store.update(sessionId, editing, comment); setEditing(null); }}>保存</Button></div>}>{selected && <div className="amadeus-annotation-editor"><textarea autoFocus aria-label="修改注释的问题" value={comment} onChange={e => setComment(e.target.value)} /></div>}</Modal></>;
 }
 function SelectionPopup({ selection, onSave, onClose }) {
   const [editing, setEditing] = useState(false), [annotation, setAnnotation] = useState(''), [error, setError] = useState('');
@@ -662,8 +662,8 @@ function SelectionPopup({ selection, onSave, onClose }) {
     try { onSave({ text: selection.text, source: selection.source, annotation }); }
     catch (error) { setError(error.message); }
   }
-  return <div className={`cf-selection ${editing ? 'cf-selection-editor' : 'cf-selection-prompt'}`} style={{ left: Math.max(8, Math.min(selection.x, innerWidth - (editing ? 308 : 126))), top: Math.max(8, Math.min(selection.y + 6, innerHeight - (editing ? 50 : 38))) }} role={editing ? 'dialog' : undefined} aria-label="添加到对话" onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
-    {!editing ? <button className="cf-selection-trigger" onMouseDown={e => e.preventDefault()} onClick={() => setEditing(true)}><span aria-hidden="true">＋</span> 添加到对话</button> : <><input autoFocus type="text" aria-label="针对选中文本的问题" placeholder="添加可选评论…" value={annotation} onChange={e => setAnnotation(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); save(); } }} /><button type="button" className="cf-selection-confirm" aria-label="添加注释" title="添加注释" onClick={save}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4.5 10 3.5 4 7.5-9" /></svg></button>{error && <p role="alert">{error}</p>}</>}
+  return <div className={`amadeus-selection ${editing ? 'amadeus-selection-editor' : 'amadeus-selection-prompt'}`} style={{ left: Math.max(8, Math.min(selection.x, innerWidth - (editing ? 308 : 126))), top: Math.max(8, Math.min(selection.y + 6, innerHeight - (editing ? 50 : 38))) }} role={editing ? 'dialog' : undefined} aria-label="添加到对话" onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
+    {!editing ? <button className="amadeus-selection-trigger" onMouseDown={e => e.preventDefault()} onClick={() => setEditing(true)}><span aria-hidden="true">＋</span> 添加到对话</button> : <><input autoFocus type="text" aria-label="针对选中文本的问题" placeholder="添加可选评论…" value={annotation} onChange={e => setAnnotation(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); save(); } }} /><button type="button" className="amadeus-selection-confirm" aria-label="添加注释" title="添加注释" onClick={save}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4.5 10 3.5 4 7.5-9" /></svg></button>{error && <p role="alert">{error}</p>}</>}
   </div>;
 }
 function installSelection(ctx, store) {
@@ -689,11 +689,11 @@ function installSelection(ctx, store) {
     const element = selection.anchorNode?.nodeType === 1 ? selection.anchorNode : selection.anchorNode?.parentElement;
     const endElement = selection.focusNode?.nodeType === 1 ? selection.focusNode : selection.focusNode?.parentElement;
     const editable = element?.closest('[contenteditable="true"]');
-    if (element?.closest('textarea,input,.cf-annotations') || (editable && !editable.closest('.cm-editor'))) return close();
+    if (element?.closest('textarea,input,.amadeus-annotations') || (editable && !editable.closest('.cm-editor'))) return close();
     let source, sessionId;
-    const file = element?.closest('[data-cf-path]');
+    const file = element?.closest('[data-amadeus-path]');
     if (file) {
-      const end = endElement?.closest('[data-cf-path]');
+      const end = endElement?.closest('[data-amadeus-path]');
       if (!end || end.dataset.cfPath !== file.dataset.cfPath) return close();
       sessionId = file.dataset.cfSession;
       source = { kind: 'file', path: file.dataset.cfPath, format: file.dataset.cfFormat };
@@ -729,14 +729,14 @@ function UnsavedClosePrompt({ request, onCancel, onClose }) {
       onClose(false);
     } catch (saveError) { setError(saveError.message); setBusy(false); }
   };
-  return <Modal open title="保存对文件的修改？" closeLabel="关闭" onClose={() => !busy && onCancel()} className="cf-modal" footer={<div className="cf-modal-actions"><Button disabled={busy} onClick={onCancel}>取消</Button><Button disabled={busy} onClick={() => onClose(true)}>不保存</Button><Button variant="primary" disabled={busy} onClick={saveAndClose}>{busy ? '保存中…' : '保存并关闭'}</Button></div>}><p className="cf-modal-path">{request.path}</p>{error && <p className="cf-error" role="alert">{error}</p>}</Modal>;
+  return <Modal open title="保存对文件的修改？" closeLabel="关闭" onClose={() => !busy && onCancel()} className="amadeus-modal" footer={<div className="amadeus-modal-actions"><Button disabled={busy} onClick={onCancel}>取消</Button><Button disabled={busy} onClick={() => onClose(true)}>不保存</Button><Button variant="primary" disabled={busy} onClick={saveAndClose}>{busy ? '保存中…' : '保存并关闭'}</Button></div>}><p className="amadeus-modal-path">{request.path}</p>{error && <p className="amadeus-error" role="alert">{error}</p>}</Modal>;
 }
 export function apply(ctx) {
   const store = createAnnotationStore(sessionStorage);
   const previewCache = createPreviewCache({ maxEntries: 6 });
   const documentStore = createDocumentStore();
   const texCompiler = createTexCompiler();
-  const renderedPreviewId = 'dsh-cofolio-rendered-preview', renderedPreviewKind = 'cofolio-rendered-preview';
+  const renderedPreviewId = 'dsh-amadeus-rendered-preview', renderedPreviewKind = 'amadeus-rendered-preview';
   const PagedReader = props => <PagedTab {...props} cache={previewCache} />;
   const renderLatexPdf = (pdf, info) => <GeneratedPdfPreview bytes={pdf} {...info} />;
   const openPreviewBeside = ({ address, panelId }) => {
@@ -747,7 +747,7 @@ export function apply(ctx) {
   const RenderedPreview = props => <RenderedPreviewTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={renderLatexPdf} />;
   const PreviewTitleContent = ({ address }) => {
     const record = documentStore.open(address), snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
-    return <span className="cf-dirty-title">{snapshot.dirty && <DirtyDot />}<span>{sourcePath(address).split('/').pop()} · 预览</span></span>;
+    return <span className="amadeus-dirty-title">{snapshot.dirty && <DirtyDot />}<span>{sourcePath(address).split('/').pop()} · 预览</span></span>;
   };
   const PreviewTitle = props => { const address = props.useTabInfo().tab.navigation.params?.address; return address ? <PreviewTitleContent address={address} /> : '预览'; };
   const editable = address => { try { return !!editorKind(sourcePath(address)); } catch { return false; } };
@@ -757,7 +757,7 @@ export function apply(ctx) {
     if (source?.kind !== 'file') return;
     const sessionId = ctx.sessions.list.getSnapshot().current;
     if (!sessionId) return;
-    ctx.sidebarRight.openResource(sessionFileAddress(sessionId, source.path), { params: { cofolioAnnotation: { page: source.pageStart, text: annotation.text } } });
+    ctx.sidebarRight.openResource(sessionFileAddress(sessionId, source.path), { params: { amadeusAnnotation: { page: source.pageStart, text: annotation.text } } });
   };
   const closeHost = document.createElement('div'), closeRoot = createRoot(closeHost), closeBypass = new Set();
   document.body.append(closeHost);
@@ -790,11 +790,11 @@ export function apply(ctx) {
   ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
-  const pagedId = 'dsh-cofolio-paged-reader';
+  const pagedId = 'dsh-amadeus-paged-reader';
   ctx.effect(() => ctx.sidebarRightTabs.register({ id: renderedPreviewId, kind: renderedPreviewKind, priority: 'extension', title: () => '预览' }));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: renderedPreviewId }, RenderedPreview)));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({ name: 'sidebar.right.pane.tab.title', key: renderedPreviewId }, PreviewTitle)));
-  ctx.effect(() => ctx.sidebarRightTabs.register({ id: pagedId, kind: 'cofolio-paged', priority: 'extension', patterns: ['*.pdf', '*.doc', '*.docx', '*.ppt', '*.pptx'], canOpen: address => { try { return new URL(address).host === 'file' && !!sourcePath(address); } catch { return false; } }, title: address => sourcePath(address).split('/').pop() }));
+  ctx.effect(() => ctx.sidebarRightTabs.register({ id: pagedId, kind: 'amadeus-paged', priority: 'extension', patterns: ['*.pdf', '*.doc', '*.docx', '*.ppt', '*.pptx'], canOpen: address => { try { return new URL(address).host === 'file' && !!sourcePath(address); } catch { return false; } }, title: address => sourcePath(address).split('/').pop() }));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: pagedId }, PagedReader)));
   // Persisted layouts from 0.1.0 still contain native `text` tabs for PDFs and
   // Office files. Intercept these bodies before their full-file reader mounts.
@@ -832,7 +832,7 @@ export function apply(ctx) {
         const record = documentStore.open(address);
         const snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
         const name = sourcePath(address).split('/').pop();
-        return <span className="cf-dirty-title">{snapshot.dirty && <DirtyDot />}{snapshot.previewing ? <span>{name} · 预览</span> : <Native {...props} />}</span>;
+        return <span className="amadeus-dirty-title">{snapshot.dirty && <DirtyDot />}{snapshot.previewing ? <span>{name} · 预览</span> : <Native {...props} />}</span>;
       };
       const DirtyTitle = props => { const { tab } = props.useTabInfo(); return editable(tab.contentId) ? <EditableTitle {...props} address={tab.contentId} /> : <Native {...props} />; };
       entry.component = DirtyTitle;
@@ -841,7 +841,7 @@ export function apply(ctx) {
     install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.pane.tab.title', install);
     return () => { unsubscribe(); dispose?.(); };
   }));
-  ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles + loadingStyles + pageControlStyles + editorStyles + previewStyles + cofolioKatexCss; document.head.append(style); return () => style.remove(); });
+  ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles + loadingStyles + pageControlStyles + editorStyles + previewStyles + amadeusKatexCss; document.head.append(style); return () => style.remove(); });
   // Add selection provenance around native document bodies without replacing
   // Markdown rendering, syntax highlighting, or the existing viewer choices.
   ctx.effect(() => ctx.slots.inject('sidebar.right.tab.document', () => {
@@ -854,7 +854,7 @@ export function apply(ctx) {
           if (props.content?.kind !== 'text') return <Native {...props} />;
           let path;
           try { path = sourcePath(props.resourceAddress); } catch { return <Native {...props} />; }
-          return <div className="cf-source-document" style={{ display: 'contents' }} data-cf-path={path} data-cf-format={path.split('.').pop().toLowerCase()} data-cf-session={props.sessionId}><Native {...props} /></div>;
+          return <div className="amadeus-source-document" style={{ display: 'contents' }} data-amadeus-path={path} data-amadeus-format={path.split('.').pop().toLowerCase()} data-amadeus-session={props.sessionId}><Native {...props} /></div>;
         };
         entry.component = Annotatable;
         wrapped.set(entry, { Native, Annotatable });
@@ -863,7 +863,7 @@ export function apply(ctx) {
     install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.tab.document', install);
     return () => { unsubscribe(); for (const [entry, { Native, Annotatable }] of wrapped) if (entry.component === Annotatable) entry.component = Native; };
   }));
-  ctx.effect(() => ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({ name: 'conversation.input.overlay', id: 'cofolio-annotations' }, props => <AnnotationDock {...props} store={store} />)));
+  ctx.effect(() => ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({ name: 'conversation.input.overlay', id: 'amadeus-annotations' }, props => <AnnotationDock {...props} store={store} />)));
   ctx.effect(() => installSelection(ctx, store));
   // Override presentation through the public keyed slot; keep native semantic
   // kinds so scrolling, steering, process folding and turn navigation work.
@@ -872,21 +872,21 @@ export function apply(ctx) {
     function install() {
       for (const entry of ctx.slots.entries('conversation.chat.node')) {
         const kind = entry.options.key;
-        if (!['user', 'steering', 'assistant-step'].includes(kind) || installed.has(kind) || entry.options.registrant?.startsWith('cofolio-annotated-')) continue;
+        if (!['user', 'steering', 'assistant-step'].includes(kind) || installed.has(kind) || entry.options.registrant?.startsWith('amadeus-annotated-')) continue;
         installed.add(kind);
         const Native = entry.component;
         if (kind === 'assistant-step') {
           const WrappedAssistant = props => <AssistantWithAnnotationLinks {...props} Native={Native} openAnnotation={openAnnotation} />;
-          disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'cofolio-annotated-assistant' }, WrappedAssistant));
+          disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'amadeus-annotated-assistant' }, WrappedAssistant));
           continue;
         }
         const Wrapped = props => {
           const node = props.node;
           const text = node.data.content.filter(b => b.type === 'text').map(b => b.text).join('');
-          const cofolio = parseAnnotatedPrompt(text);
-          return cofolio ? <SentAnnotations {...props} node={{ ...node, data: { ...node.data, cofolio } }} /> : <Native {...props} />;
+          const amadeus = parseAnnotatedPrompt(text);
+          return amadeus ? <SentAnnotations {...props} node={{ ...node, data: { ...node.data, amadeus } }} /> : <Native {...props} />;
         };
-        disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'cofolio-annotated-user' }, Wrapped));
+        disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'amadeus-annotated-user' }, Wrapped));
       }
     }
     install(); const unsubscribe = ctx.slots.subscribe('conversation.chat.node', install);
@@ -900,15 +900,15 @@ export function apply(ctx) {
       const snapshot = [...store.get(id)];
       const visibleText = stripAnnotationDraftMarker(text);
       const annotated = snapshot.length > 0;
-      if (annotated && annotationSubmissions++ === 0) document.body.setAttribute('data-cf-annotation-submitting', '');
+      if (annotated && annotationSubmissions++ === 0) document.body.setAttribute('data-amadeus-annotation-submitting', '');
       try {
         const result = await original.call(this, session, serializeAnnotations(snapshot, visibleText), attachments, mode, signal);
         if (result.kind === 'success') store.settle(id, snapshot);
         return result;
       } finally {
-        if (annotated) setTimeout(() => { if (--annotationSubmissions === 0) document.body.removeAttribute('data-cf-annotation-submitting'); }, 250);
+        if (annotated) setTimeout(() => { if (--annotationSubmissions === 0) document.body.removeAttribute('data-amadeus-annotation-submitting'); }, 250);
       }
     };
-    return () => { conversation.sendSession = original; annotationSubmissions = 0; document.body.removeAttribute('data-cf-annotation-submitting'); };
+    return () => { conversation.sendSession = original; annotationSubmissions = 0; document.body.removeAttribute('data-amadeus-annotation-submitting'); };
   });
 }

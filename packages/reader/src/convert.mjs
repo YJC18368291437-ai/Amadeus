@@ -7,7 +7,7 @@ import { createOnlyOffice, DEFAULT_IMAGE } from './onlyoffice.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 export const fileVersion = info => hash([info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':'));
-export function createConverter({ executable = 'docbuilder', mode = 'native', image = DEFAULT_IMAGE, dockerExecutable, fontsDir, cacheVersion = '1', cacheDir = path.join(os.tmpdir(), 'cofolio-preview-cache'), timeoutMs = 120000, maxFileBytes = 512 * 1024 ** 2, maxCacheBytes = 2 * 1024 ** 3, workers = 1, office = createOnlyOffice({ executable, mode, image, dockerExecutable, fontsDir, timeoutMs, workers }) } = {}) {
+export function createConverter({ executable = 'docbuilder', mode = 'native', image = DEFAULT_IMAGE, dockerExecutable, fontsDir, cacheVersion = '1', cacheDir = path.join(os.tmpdir(), 'amadeus-preview-cache'), timeoutMs = 120000, maxFileBytes = 512 * 1024 ** 2, maxCacheBytes = 2 * 1024 ** 3, workers = 1, office = createOnlyOffice({ executable, mode, image, dockerExecutable, fontsDir, timeoutMs, workers }) } = {}) {
   const engine = hash(JSON.stringify(['onlyoffice-pdf-v1', mode, mode === 'docker' ? image : executable, fontsDir, cacheVersion]));
   const jobs = new Map(), conversions = new Map();
   const sourceProgress = new Map(), contentProgress = new Map();

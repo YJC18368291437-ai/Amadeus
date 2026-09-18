@@ -1,5 +1,5 @@
-const DEFAULT_ASSET_BASE = '/cofolio/reader-assets/tex/';
-const DEFAULT_TEXLIVE_ENDPOINT = '/cofolio/texlive/';
+const DEFAULT_ASSET_BASE = '/amadeus/reader-assets/tex/';
+const DEFAULT_TEXLIVE_ENDPOINT = '/amadeus/texlive/';
 
 export class TexCompileError extends Error {
   constructor(message, log, status) {
@@ -69,7 +69,7 @@ class WorkerEngine {
 function formatDatabase() {
   if (!globalThis.indexedDB) return Promise.resolve(null);
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('cofolio-tex', 1);
+    const request = indexedDB.open('amadeus-tex', 1);
     request.onupgradeneeded = () => request.result.createObjectStore('formats');
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -101,7 +101,7 @@ async function writeCachedFormat(key, bytes) {
   } catch {}
 }
 
-export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpoint = DEFAULT_TEXLIVE_ENDPOINT, timeoutMs = 120000, formatCacheKey = 'cofolio-xelatex-format-v1' } = {}) {
+export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpoint = DEFAULT_TEXLIVE_ENDPOINT, timeoutMs = 120000, formatCacheKey = 'amadeus-xelatex-format-v1' } = {}) {
   const xetex = new WorkerEngine({ script: `${assetBase}swiftlatexxetex.js`, command: 'compilelatex', timeoutMs });
   const dvipdfmx = new WorkerEngine({ script: `${assetBase}swiftlatexdvipdfm.js`, command: 'compilepdf', timeoutMs });
   let chain = Promise.resolve(), initializePromise, formatBytes;

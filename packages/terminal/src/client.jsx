@@ -4,7 +4,7 @@ export const inject = ['connection'];
 export function apply(ctx) {
   const rpc = ctx.connection.rpc;
   const original = rpc.call;
-  const transport = createTerminalTransport({ socketFactory: () => new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/cofolio/terminal`) });
+  const transport = createTerminalTransport({ socketFactory: () => new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/amadeus/terminal`) });
   ctx.effect(() => {
     rpc.call = function(channel, endpoint, payload, signal) {
       if (channel === '/api' && endpoint.startsWith('terminal/')) return transport.call(endpoint, payload, signal);

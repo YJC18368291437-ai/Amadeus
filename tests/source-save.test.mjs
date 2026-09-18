@@ -6,7 +6,7 @@ import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { readTextSource, saveTextSource, statTextSource } from '../packages/files/src/source.mjs';
 
 async function workspace(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cofolio-source-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'amadeus-source-'));
   t.after(async () => {
     assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep));
     await rm(root, { recursive: true, force: true });

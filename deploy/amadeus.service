@@ -1,16 +1,16 @@
 [Unit]
-Description=Amadeus learning workspace (DeepSeek Harness)
+Description=Amadeus DSH document workspace
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=cofolio
-Group=cofolio
-WorkingDirectory=/srv/cofolio
+User=amadeus
+Group=amadeus
+WorkingDirectory=/srv/amadeus
 Environment=NODE_ENV=production
-Environment=COFOLIO_CONFIG=/srv/cofolio/cofolio.local.yml
-ExecStart=/usr/bin/node /srv/cofolio/scripts/start.mjs
+Environment=AMADEUS_CONFIG=/srv/amadeus/amadeus.local.yml
+ExecStart=/usr/bin/node /srv/amadeus/scripts/start.mjs
 Restart=on-failure
 RestartSec=5
 KillMode=control-group

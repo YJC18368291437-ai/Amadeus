@@ -18,7 +18,7 @@ export function parseAnnotatedPrompt(text) {
   } catch { return null; }
 }
 export function linkAnnotationReferences(text, maximum = Number.POSITIVE_INFINITY) {
-  const linked = number => Number(number) >= 1 && Number(number) <= maximum ? `[注释 ${Number(number)}](#cofolio-annotation-${Number(number)})` : null;
+  const linked = number => Number(number) >= 1 && Number(number) <= maximum ? `[注释 ${Number(number)}](#amadeus-annotation-${Number(number)})` : null;
   return text
     .replace(/(?:\[|【|（|\()注释\s*(\d+)(?:\]|】|）|\))(?!\()/g, (label, number) => linked(number) ?? label)
     .replace(/(?<![\[【（(])注释\s*(\d+)(?!\s*[\]】）)]|\s*\()/g, (label, number) => linked(number) ?? label);
@@ -60,14 +60,14 @@ export function createAnnotationStore(storage) {
   function get(sessionId) {
     if (!states.has(sessionId)) {
       let value = [];
-      try { const stored = JSON.parse(storage?.getItem(`cofolio.annotations.${sessionId}`) ?? '[]'); if (Array.isArray(stored)) value = stored.filter(a => a?.id && typeof a.text === 'string' && a.source).slice(0, 50); } catch {}
+      try { const stored = JSON.parse(storage?.getItem(`amadeus.annotations.${sessionId}`) ?? '[]'); if (Array.isArray(stored)) value = stored.filter(a => a?.id && typeof a.text === 'string' && a.source).slice(0, 50); } catch {}
       states.set(sessionId, value);
     }
     return states.get(sessionId);
   }
   function set(sessionId, value) {
     states.set(sessionId, value);
-    try { storage?.setItem(`cofolio.annotations.${sessionId}`, JSON.stringify(value)); } catch {}
+    try { storage?.setItem(`amadeus.annotations.${sessionId}`, JSON.stringify(value)); } catch {}
     for (const notify of listeners) notify();
   }
   return {

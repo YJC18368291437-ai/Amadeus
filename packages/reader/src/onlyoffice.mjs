@@ -22,7 +22,7 @@ export function createOnlyOffice({ executable = 'docbuilder', mode = 'native', i
   });
   async function run(job) {
     const { input, directory, onProgress } = job;
-    const name = `cofolio-builder-${randomUUID()}`;
+    const name = `amadeus-builder-${randomUUID()}`;
     const inputPath = mode === 'docker' ? `/job/${path.basename(input)}` : input.replaceAll('\\', '/');
     const outputPath = mode === 'docker' ? '/job/input.pdf' : path.join(directory, 'input.pdf').replaceAll('\\', '/');
     const script = path.join(directory, 'convert.docbuilder');
@@ -33,7 +33,7 @@ export function createOnlyOffice({ executable = 'docbuilder', mode = 'native', i
       command = dockerExecutable;
       args = ['run', '--rm', '--name', name, '--network', 'none', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--memory', '2g', '--cpus', '2', '--mount', `type=bind,source=${directory},target=/job`];
       if (process.platform === 'linux') args.push('--user', `${process.getuid()}:${process.getgid()}`, '--env', 'HOME=/tmp');
-      if (fontsDir) args.push('--mount', `type=bind,source=${path.resolve(fontsDir)},target=/usr/share/fonts/truetype/cofolio,readonly`);
+      if (fontsDir) args.push('--mount', `type=bind,source=${path.resolve(fontsDir)},target=/usr/share/fonts/truetype/amadeus,readonly`);
       args.push('--entrypoint', DOCKER_BUILDER, image, '/job/convert.docbuilder');
     }
     onProgress?.({}); // Builder has no reliable page-by-page progress callback.

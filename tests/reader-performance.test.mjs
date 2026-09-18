@@ -9,7 +9,7 @@ import { sendPdf } from '../packages/reader/src/pdf-http.mjs';
 import { apply } from '../packages/reader/src/index.mjs';
 
 async function directory(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cofolio-reader-test-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'amadeus-reader-test-'));
   t.after(async () => { assert.ok(root.startsWith(path.resolve(os.tmpdir()) + path.sep)); await rm(root, { recursive: true, force: true, maxRetries: 5 }); });
   return root;
 }
@@ -44,7 +44,7 @@ test('PDF ranges, validators, HEAD and stale If-Range preserve exact bytes', asy
 });
 
 test('PDF attachment mode keeps exact bytes and an UTF-8 filename', async t => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'cofolio-pdf-download-'));
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'amadeus-pdf-download-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const source = path.join(directory, 'source.pdf');
   const bytes = Buffer.from('%PDF-download');
@@ -61,14 +61,14 @@ test('metadata route does not convert; replaced files reject an old range URL', 
   const routes = new Map(), disposers = [];
   apply({ sessions: { get: id => id === 'test' ? { header: { cwd: root } } : null }, get: () => undefined, effect: fn => disposers.push(fn()), webServer: { register: route => { routes.set(route.path, route.handler); return () => {}; } } }, { cacheDir: path.join(root, 'cache'), executable: 'nonexistent-office' });
   t.after(async () => { for (const dispose of disposers.reverse()) await dispose?.(); });
-  const url = await listen(t, (req, res) => routes.get('/cofolio/preview')(req, res));
-  const response = await fetch(`${url}/cofolio/preview?session=test&path=slides.pptx&metadata=1`);
+  const url = await listen(t, (req, res) => routes.get('/amadeus/preview')(req, res));
+  const response = await fetch(`${url}/amadeus/preview?session=test&path=slides.pptx&metadata=1`);
   assert.equal(response.status, 200);
   const metadata = await response.json();
   assert.equal(metadata.version, fileVersion(await stat(source, { bigint: true })));
   await writeFile(source, 'modified-presentation');
   assert.equal((await fetch(url + metadata.url, { headers: { Range: 'bytes=0-4' } })).status, 409);
-  assert.equal((await fetch(`${url}/cofolio/preview?session=missing&path=slides.pptx&metadata=1`)).status, 404);
+  assert.equal((await fetch(`${url}/amadeus/preview?session=missing&path=slides.pptx&metadata=1`)).status, 404);
 });
 test('conversion deduplicates concurrent reads, persists metadata cache and invalidates replacements', async t => {
   const root = await directory(t), source = path.join(root, 'slides.pptx');
@@ -99,8 +99,8 @@ test('authenticated progress endpoint exposes exporter counts before conversion 
   const routes = new Map(), disposers = [];
   apply({ sessions: { get: id => id === 'test' ? { header: { cwd: root } } : null }, get: () => undefined, effect: fn => disposers.push(fn()), webServer: { register: route => { routes.set(route.path, route.handler); return () => {}; } } }, { cacheDir: path.join(root, 'cache'), office });
   t.after(async () => { release(); for (const dispose of disposers.reverse()) await dispose?.(); });
-  const base = await listen(t, (req, res) => routes.get('/cofolio/preview')(req, res));
-  const metadata = await fetch(`${base}/cofolio/preview?session=test&path=slides.pptx&metadata=1`).then(r => r.json());
+  const base = await listen(t, (req, res) => routes.get('/amadeus/preview')(req, res));
+  const metadata = await fetch(`${base}/amadeus/preview?session=test&path=slides.pptx&metadata=1`).then(r => r.json());
   const download = fetch(base + metadata.url);
   await started;
   try {

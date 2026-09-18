@@ -8,7 +8,7 @@ import { upload, zipDirectory } from '../packages/files/src/transfer.mjs';
 import { childWithin, resolveWithin, versionOf } from '../packages/files/src/workspace.mjs';
 import { inspectRemoval, removeConfirmed } from '../packages/files/src/remove.mjs';
 async function workspace(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cofolio-test-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'amadeus-test-'));
   t.after(async () => { assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)); await rm(root, { recursive: true, force: true }); });
   return root;
 }
@@ -21,7 +21,7 @@ test('folder structure, collision approval, atomic commit and transfer limits', 
   await upload(root, '课程/week1/a.md', Readable.from('updated'), { overwriteVersion: version });
   await assert.rejects(upload(root, '课程/week1/a.md', Readable.from('stale'), { overwriteVersion: version }), e => e.status === 409);
   await assert.rejects(upload(root, 'large.txt', Readable.from('123456789'), { maxBytes: 4 }), e => e.status === 413);
-  assert.equal((await readdir(root)).some(n => n.startsWith('.cofolio-upload-') || n === 'large.txt'), false);
+  assert.equal((await readdir(root)).some(n => n.startsWith('.amadeus-upload-') || n === 'large.txt'), false);
   assert.equal(await readFile(path.join(root, '课程/week1/a.md'), 'utf8'), 'updated');
 });
 test('simultaneous new uploads cannot silently replace one another', async t => {
@@ -40,7 +40,7 @@ test('traversal, absolute escape and symlink escape refused', async t => {
 });
 test('ZIP retains names and empty directories', async t => {
   const root = await workspace(t);
-  await upload(root, 'notes/a.txt', Readable.from('cofolio'));
+  await upload(root, 'notes/a.txt', Readable.from('amadeus'));
   await mkdir(path.join(root, 'empty'));
   const chunks = [];
   for await (const chunk of await zipDirectory(root, root)) chunks.push(chunk);

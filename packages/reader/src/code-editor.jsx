@@ -7,9 +7,9 @@ import { languageExtension } from './editor-language.mjs';
 import { useCtrlWheelZoom } from './wheel-zoom.jsx';
 import { clampZoom } from './zoom.mjs';
 
-const cofolioTheme = EditorView.theme({
+const amadeusTheme = EditorView.theme({
   '&': { height: '100%', color: 'var(--dsw-alias-label-primary)', backgroundColor: 'var(--dsw-alias-bg-base)' },
-  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--ds-font-family-code, ui-monospace, monospace)', fontSize: 'var(--cf-editor-font-size, 13px)' },
+  '.cm-scroller': { overflow: 'auto', fontFamily: 'var(--ds-font-family-code, ui-monospace, monospace)', fontSize: 'var(--amadeus-editor-font-size, 13px)' },
   '.cm-content': { caretColor: 'var(--dsw-alias-label-primary)', padding: '10px 0' },
   '.cm-gutters': { backgroundColor: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-caption)', borderRight: '.5px solid var(--dsw-alias-border-l4)' },
   '.cm-activeLine,.cm-activeLineGutter': { backgroundColor: 'var(--dsw-alias-interactive-bg-hover)' },
@@ -44,7 +44,7 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef, histo
           extensions: [
             basicSetup,
             language,
-            cofolioTheme,
+            amadeusTheme,
             wrapping.of(wrap ? EditorView.lineWrapping : []),
             keymap.of([saveKey]),
             EditorView.updateListener.of(update => {
@@ -92,5 +92,5 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef, histo
     view.focus();
   }, [hidden, reveal?.revision]);
 
-  return <div ref={holder} className="cf-code-editor" style={{ '--cf-editor-font-size': `${fontSize}px` }} hidden={hidden} />;
+  return <div ref={holder} className="amadeus-code-editor" style={{ '--amadeus-editor-font-size': `${fontSize}px` }} hidden={hidden} />;
 }

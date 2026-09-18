@@ -16,6 +16,6 @@ Each item contains text selected from an earlier Codex response and may include 
 
 普通文件选区另有 `# Selected text:`、`## Selection N: 路径 (line N / lines N-M)` 结构。PDF 批注的组装函数会添加 `PDF path: 原路径` 和 `PDF page: 页码/总页数`。因此，Codex 并不是所有来源都使用同一个提示词模板。
 
-CoFolio 保留三字段结构和逐条回答语义，并扩展 source：`kind=file` 包含原文件 path、format、pageStart/pageEnd/pageCount；文本文件只有 path/format；`kind=conversation` 包含 sessionId、可识别的消息/节点定位及选区周边原文。页码从 1 开始，PPT 一张幻灯片对应一页，Word 页码以服务器转换后的阅读版本为准。
+Amadeus 保留三字段结构和逐条回答语义，并扩展 source：`kind=file` 包含原文件 path、format、pageStart/pageEnd/pageCount；文本文件只有 path/format；`kind=conversation` 包含 sessionId、可识别的消息/节点定位及选区周边原文。页码从 1 开始，PPT 一张幻灯片对应一页，Word 页码以服务器转换后的阅读版本为准。
 
-dsh 不支持 Codex 专用 inline directive，CoFolio 提示模型使用 `[注释 N]`。这是有意的适配，不声称逐字复制 Codex 的完整内部提示词。JSON 中转义尖括号，以避免所选资料意外结束上下文标签。
+dsh 不支持 Codex 专用 inline directive，Amadeus 提示模型使用 `[注释 N]`。这是有意的适配，不声称逐字复制 Codex 的完整内部提示词。JSON 中转义尖括号，以避免所选资料意外结束上下文标签。

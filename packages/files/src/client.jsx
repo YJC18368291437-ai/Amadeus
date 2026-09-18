@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Button, Modal, FileTypeIcon } from '@deepseek-ai/dsh-client-ui-primitives';
-import styles from '../../../ui/cofolio.css';
+import styles from '../../../ui/amadeus.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 export const inject = ['slots', 'sidebarRightTabs'];
 export function fileUrl(action, session, path, extra = {}) {
-  return `/cofolio/files/${action}?${new URLSearchParams({ session, path, ...extra })}`;
+  return `/amadeus/files/${action}?${new URLSearchParams({ session, path, ...extra })}`;
 }
 async function request(url, init) {
   const response = await fetch(url, init);
@@ -45,7 +45,7 @@ function Files({ sessionId, useTabInfo }) {
   }, [sessionId, tab.tab.visible]);
   useEffect(() => {
     const element = scrollArea.current;
-    const measure = () => panel.current?.style.setProperty('--cf-file-scrollbar', `${element.offsetWidth - element.clientWidth}px`);
+    const measure = () => panel.current?.style.setProperty('--amadeus-file-scrollbar', `${element.offsetWidth - element.clientWidth}px`);
     const observer = new ResizeObserver(measure); observer.observe(element); measure();
     return () => observer.disconnect();
   }, []);
@@ -121,35 +121,35 @@ function Files({ sessionId, useTabInfo }) {
     finally { if (generation.current === current) setRemoving(false); }
   }
   function actions(path, directory) {
-    return <span className="cf-actions cf-file-actions">
-      {directory ? <button className="cf-icon" title="上传文件或文件夹" aria-label={`上传到 ${path || '项目根目录'}`} disabled={!!busy || removing} onClick={() => setUploadTo(path)}><Arrow direction="up" /></button> : <span className="cf-action-placeholder" aria-hidden="true" />}
-      <a className="cf-icon" href={fileUrl('download', sessionId, path)} title={directory ? '下载文件夹（ZIP）' : '下载文件'} aria-label={`下载 ${path || '项目'}`} download><Arrow direction="down" /></a>
-      {path && <button className="cf-icon cf-file-remove" title={directory ? '删除文件夹' : '删除文件'} aria-label={`删除 ${path}`} disabled={!!busy || removing || checkingRemoval !== null} onClick={() => askRemoval(path)}><Trash /></button>}
+    return <span className="amadeus-actions amadeus-file-actions">
+      {directory ? <button className="amadeus-icon" title="上传文件或文件夹" aria-label={`上传到 ${path || '项目根目录'}`} disabled={!!busy || removing} onClick={() => setUploadTo(path)}><Arrow direction="up" /></button> : <span className="amadeus-action-placeholder" aria-hidden="true" />}
+      <a className="amadeus-icon" href={fileUrl('download', sessionId, path)} title={directory ? '下载文件夹（ZIP）' : '下载文件'} aria-label={`下载 ${path || '项目'}`} download><Arrow direction="down" /></a>
+      {path && <button className="amadeus-icon amadeus-file-remove" title={directory ? '删除文件夹' : '删除文件'} aria-label={`删除 ${path}`} disabled={!!busy || removing || checkingRemoval !== null} onClick={() => askRemoval(path)}><Trash /></button>}
     </span>;
   }
   function tree(path) {
-    return <ul className="cf-tree">{(levels[path] || []).map(entry => {
+    return <ul className="amadeus-tree">{(levels[path] || []).map(entry => {
       const target = [path, entry.name].filter(Boolean).join('/'), dir = entry.type === 'directory', regular = dir || entry.type === 'file';
-      return <li key={target}><div className="cf-row">
-        <button className="cf-filename" disabled={!regular} aria-expanded={dir ? expanded.has(target) : undefined} title={entry.name} onClick={() => dir ? toggle(target) : tab.tab.actions.openResource(`dsh-resource://file/session/${encodeURIComponent(sessionId)}/${target.split('/').map(encodeURIComponent).join('/')}`)}><FileTypeIcon {...(dir ? { kind: 'folder' } : { path: entry.name })} size={16} /><span>{entry.name}</span></button>
+      return <li key={target}><div className="amadeus-row">
+        <button className="amadeus-filename" disabled={!regular} aria-expanded={dir ? expanded.has(target) : undefined} title={entry.name} onClick={() => dir ? toggle(target) : tab.tab.actions.openResource(`dsh-resource://file/session/${encodeURIComponent(sessionId)}/${target.split('/').map(encodeURIComponent).join('/')}`)}><FileTypeIcon {...(dir ? { kind: 'folder' } : { path: entry.name })} size={16} /><span>{entry.name}</span></button>
         {regular && actions(target, dir)}
       </div>{dir && expanded.has(target) && tree(target)}</li>;
     })}</ul>;
   }
-  return <section ref={panel} className="cf-files" aria-label="项目文件">
-    <header className="cf-toolbar"><span className="cf-ellipsis" title={root}>{root || '项目文件'}</span>{actions('', true)}</header>
+  return <section ref={panel} className="amadeus-files" aria-label="项目文件">
+    <header className="amadeus-toolbar"><span className="amadeus-ellipsis" title={root}>{root || '项目文件'}</span>{actions('', true)}</header>
     <input ref={files} type="file" multiple hidden onChange={e => uploadFiles([...e.target.files])} />
     <input ref={folder} type="file" multiple webkitdirectory="" hidden onChange={e => uploadFiles([...e.target.files])} />
-    {busy && <div className="cf-notice" role="status">正在上传 {busy}<button onClick={() => { conflictResolver.current?.('cancel'); controller.current?.abort(); }}>取消</button></div>}
-    {error && <p className="cf-error" role="alert">{error}</p>}
-    <div ref={scrollArea} className="cf-tree-scroll">{tree('')}{levels['']?.length === 0 && <p className="cf-muted">此目录为空，点击 ↑ 添加资料。</p>}</div>
-    <Modal open={uploadTo !== null} title="上传资料" closeLabel="关闭" onClose={() => setUploadTo(null)} className="cf-modal"><p className="cf-modal-path">上传到 {uploadTo || '项目根目录'}</p><div className="cf-modal-actions"><Button onClick={() => { destination.current = uploadTo; setUploadTo(null); files.current.click(); }}>上传文件</Button><Button variant="primary" onClick={chooseFolder}>上传文件夹</Button></div></Modal>
-    <Modal open={conflict !== null} title="文件已存在" closeLabel="关闭" onClose={() => conflictResolver.current?.('cancel')} className="cf-modal"><p className="cf-modal-path">{conflict}</p><p>替换后将使用本次上传的版本。</p><div className="cf-modal-actions"><Button onClick={() => conflictResolver.current?.('cancel')}>取消上传</Button><Button onClick={() => conflictResolver.current?.('skip')}>跳过</Button><Button variant="primary" onClick={() => conflictResolver.current?.('replace')}>替换</Button></div></Modal>
-    <Modal open={removal !== null} title={removal?.directory ? '删除文件夹？' : '删除文件？'} closeLabel="关闭" onClose={() => { if (!removing) setRemoval(null); }} className="cf-modal"><p className="cf-delete-path">{removal?.path}</p><p>{removal?.directory ? '文件夹及其中所有内容将被永久删除，无法撤销。' : '文件将被永久删除，无法撤销。'}</p>{removeError && <p className="cf-error" role="alert">{removeError}</p>}<div className="cf-modal-actions"><Button disabled={removing} onClick={() => setRemoval(null)}>取消</Button><Button className="cf-confirm-delete" variant="primary" disabled={removing || !!removeError} onClick={confirmRemoval}>{removing ? '删除中…' : '删除'}</Button></div></Modal>
+    {busy && <div className="amadeus-notice" role="status">正在上传 {busy}<button onClick={() => { conflictResolver.current?.('cancel'); controller.current?.abort(); }}>取消</button></div>}
+    {error && <p className="amadeus-error" role="alert">{error}</p>}
+    <div ref={scrollArea} className="amadeus-tree-scroll">{tree('')}{levels['']?.length === 0 && <p className="amadeus-muted">此目录为空，点击 ↑ 添加资料。</p>}</div>
+    <Modal open={uploadTo !== null} title="上传资料" closeLabel="关闭" onClose={() => setUploadTo(null)} className="amadeus-modal"><p className="amadeus-modal-path">上传到 {uploadTo || '项目根目录'}</p><div className="amadeus-modal-actions"><Button onClick={() => { destination.current = uploadTo; setUploadTo(null); files.current.click(); }}>上传文件</Button><Button variant="primary" onClick={chooseFolder}>上传文件夹</Button></div></Modal>
+    <Modal open={conflict !== null} title="文件已存在" closeLabel="关闭" onClose={() => conflictResolver.current?.('cancel')} className="amadeus-modal"><p className="amadeus-modal-path">{conflict}</p><p>替换后将使用本次上传的版本。</p><div className="amadeus-modal-actions"><Button onClick={() => conflictResolver.current?.('cancel')}>取消上传</Button><Button onClick={() => conflictResolver.current?.('skip')}>跳过</Button><Button variant="primary" onClick={() => conflictResolver.current?.('replace')}>替换</Button></div></Modal>
+    <Modal open={removal !== null} title={removal?.directory ? '删除文件夹？' : '删除文件？'} closeLabel="关闭" onClose={() => { if (!removing) setRemoval(null); }} className="amadeus-modal"><p className="amadeus-delete-path">{removal?.path}</p><p>{removal?.directory ? '文件夹及其中所有内容将被永久删除，无法撤销。' : '文件将被永久删除，无法撤销。'}</p>{removeError && <p className="amadeus-error" role="alert">{removeError}</p>}<div className="amadeus-modal-actions"><Button disabled={removing} onClick={() => setRemoval(null)}>取消</Button><Button className="amadeus-confirm-delete" variant="primary" disabled={removing || !!removeError} onClick={confirmRemoval}>{removing ? '删除中…' : '删除'}</Button></div></Modal>
   </section>;
 }
 export function apply(ctx) {
-  const id = 'dsh-cofolio-files';
+  const id = 'dsh-amadeus-files';
   ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles; document.head.append(style); return () => style.remove(); });
   ctx.effect(() => ctx.sidebarRightTabs.register({ id, kind: 'files', priority: 'extension', title: () => '项目文件', guide: [{ id: 'workspace', order: 10, title: () => '项目文件', description: () => '浏览、上传与下载学习资料', icon: ({ size, className }) => <FileTypeIcon kind="folder" size={size} className={className} /> }] }));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: id }, Files)));

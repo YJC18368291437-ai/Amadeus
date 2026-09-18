@@ -13,9 +13,9 @@ export function apply(ctx, config = {}) {
   const assets = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
   const texlive = createTexliveProxy({ cacheDir: config.texliveCacheDir ?? path.join(config.cacheDir ?? path.dirname(fileURLToPath(import.meta.url)), 'texlive-cache'), formatDir: path.join(assets, 'tex'), kpsewhich: config.kpsewhich, upstream: config.texliveUpstream });
   ctx.effect(() => () => converter.dispose());
-  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/cofolio/reader-assets', handler: routeErrors(async (req, res) => {
+  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/amadeus/reader-assets', handler: routeErrors(async (req, res) => {
     if (req.method !== 'GET') throw new HttpError(405, 'GET required');
-    const relative = decodeURIComponent(new URL(req.url, 'http://cofolio').pathname.slice('/cofolio/reader-assets/'.length));
+    const relative = decodeURIComponent(new URL(req.url, 'http://amadeus').pathname.slice('/amadeus/reader-assets/'.length));
     const target = await resolveWithin(assets, relative);
     const info = await stat(target);
     if (!info.isFile()) throw new HttpError(404, 'Asset not found');
@@ -23,14 +23,14 @@ export function apply(ctx, config = {}) {
     res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': info.size, 'Cache-Control': 'private, max-age=3600' });
     await pipeline(createReadStream(target), res);
   }) }));
-  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/cofolio/texlive', handler: routeErrors(async (req, res) => {
+  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/amadeus/texlive', handler: routeErrors(async (req, res) => {
     if (req.method !== 'GET') throw new HttpError(405, 'GET required');
-    const relative = decodeURIComponent(new URL(req.url, 'http://cofolio').pathname.slice('/cofolio/texlive/'.length));
+    const relative = decodeURIComponent(new URL(req.url, 'http://amadeus').pathname.slice('/amadeus/texlive/'.length));
     await texlive.handle(relative, res);
   }) }));
-  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/cofolio/preview', handler: routeErrors(async (req, res) => {
+  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/amadeus/preview', handler: routeErrors(async (req, res) => {
     if (!['GET', 'HEAD'].includes(req.method)) throw new HttpError(405, 'GET or HEAD required');
-    const url = new URL(req.url, 'http://cofolio');
+    const url = new URL(req.url, 'http://amadeus');
     const root = await sessionRoot(ctx, url.searchParams.get('session'));
     const original = await resolveWithin(root, url.searchParams.get('path'));
     const originalInfo = await stat(original, { bigint: true });

@@ -21,7 +21,7 @@ export function createAuth({ username, password, sessionHours = 12 }) {
   }
   const expected = `${username}:${password}`;
   const key = randomBytes(32);
-  const cookieName = 'cofolio-session';
+  const cookieName = 'amadeus-session';
   const sign = text => createHmac('sha256', key).update(text).digest('base64url');
   function authenticated(req) {
     const authorization = header(req, 'authorization');

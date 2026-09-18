@@ -1,8 +1,8 @@
 node_modules/
 packages/*/dist/
-.cofolio/
+.amadeus/
 .release/
-cofolio.local.yml
+amadeus.local.yml
 test-results/
 *.log
 .env

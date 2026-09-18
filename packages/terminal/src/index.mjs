@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 export const inject = ['webServer', 'connection', 'typertGateway'];
 export function apply(ctx) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024, perMessageDeflate: false });
-  const remove = ctx.webServer.registerUpgrade({ path: '/cofolio/terminal', handler(req, socket, head) {
+  const remove = ctx.webServer.registerUpgrade({ path: '/amadeus/terminal', handler(req, socket, head) {
     const rejected = ctx.connection.requestRejection(req);
     if (rejected) { socket.end(`HTTP/1.1 ${rejected} Rejected\r\nConnection: close\r\n\r\n`); return; }
     wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));

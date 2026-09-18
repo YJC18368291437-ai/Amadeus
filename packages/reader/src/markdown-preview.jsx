@@ -4,7 +4,7 @@ import { renderMarkdown } from './markdown-render.mjs';
 import { useCtrlWheelZoom } from './wheel-zoom.jsx';
 import { clampZoom } from './zoom.mjs';
 
-export const cofolioKatexCss = katexCss.replaceAll('url(fonts/', 'url(/cofolio/reader-assets/katex/fonts/');
+export const amadeusKatexCss = katexCss.replaceAll('url(fonts/', 'url(/amadeus/reader-assets/katex/fonts/');
 
 const printCss = `
 @page{margin:18mm 16mm}
@@ -22,12 +22,12 @@ function escapeHtml(value) {
 
 export async function printMarkdown({ title, html }) {
   const frame = document.createElement('iframe');
-  frame.className = 'cf-print-frame';
+  frame.className = 'amadeus-print-frame';
   frame.setAttribute('aria-hidden', 'true');
   document.body.append(frame);
   const target = frame.contentDocument;
   target.open();
-  target.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${cofolioKatexCss}\n${printCss}</style></head><body><main>${html}</main></body></html>`);
+  target.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${amadeusKatexCss}\n${printCss}</style></head><body><main>${html}</main></body></html>`);
   target.close();
   try { await target.fonts?.ready; } catch {}
   frame.contentWindow.focus();
@@ -44,5 +44,5 @@ export function MarkdownPreview({ source, path, printRef }) {
   useCtrlWheelZoom(preview, delta => setScale(current => clampZoom(current + delta, .5, 2.5)));
   latest.current = () => printMarkdown({ title: path.split('/').pop().replace(/\.(md|markdown)$/i, ''), html });
   if (printRef) printRef.current = () => latest.current();
-  return <article ref={preview} className="cf-markdown-preview" style={{ '--cf-markdown-font-size': `${14 * scale}px` }} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <article ref={preview} className="amadeus-markdown-preview" style={{ '--amadeus-markdown-font-size': `${14 * scale}px` }} dangerouslySetInnerHTML={{ __html: html }} />;
 }

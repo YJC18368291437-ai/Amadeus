@@ -17,8 +17,8 @@ test('annotation-only submissions do not add a default visible request', () => {
   assert.deepEqual(parseAnnotatedPrompt(prompt), { annotations: items, prompt: '' });
 });
 test('assistant annotation labels become local frontend references', () => {
-  assert.equal(linkAnnotationReferences('见 [注释 1] 与 [注释 23]。'), '见 [注释 1](#cofolio-annotation-1) 与 [注释 23](#cofolio-annotation-23)。');
-  assert.equal(linkAnnotationReferences('回答完成。【注释1】 下一条（注释 2）和注释3。', 3), '回答完成。[注释 1](#cofolio-annotation-1) 下一条[注释 2](#cofolio-annotation-2)和[注释 3](#cofolio-annotation-3)。');
+  assert.equal(linkAnnotationReferences('见 [注释 1] 与 [注释 23]。'), '见 [注释 1](#amadeus-annotation-1) 与 [注释 23](#amadeus-annotation-23)。');
+  assert.equal(linkAnnotationReferences('回答完成。【注释1】 下一条（注释 2）和注释3。', 3), '回答完成。[注释 1](#amadeus-annotation-1) 下一条[注释 2](#amadeus-annotation-2)和[注释 3](#amadeus-annotation-3)。');
   assert.equal(linkAnnotationReferences('注释 4', 3), '注释 4');
   assert.equal(linkAnnotationReferences('[注释 1](https://example.com)'), '[注释 1](https://example.com)');
 });
