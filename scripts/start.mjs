@@ -16,7 +16,7 @@ const patch = [
   { insert: [
     { id: 'cofolio-webserver', name: plugin('login'), inject: ['webStartup'], config: { host: config.host || '0.0.0.0', port: config.port ?? 3080, username: config.username, password: config.password, sessionHours: config.sessionHours ?? 12, compression: 'gzip', compressionLevel: 1, compressionThresholdBytes: 1024 } },
     { id: 'cofolio-terminal', name: plugin('terminal') },
-    { id: 'cofolio-files', name: plugin('files'), config: { maxUploadBytes: config.maxUploadBytes ?? 1024 ** 3 } },
+    { id: 'cofolio-files', name: plugin('files'), config: { maxUploadBytes: config.maxUploadBytes ?? 1024 ** 3, maxTextBytes: config.maxTextBytes ?? 5 * 1024 ** 2 } },
     { id: 'cofolio-reader', name: plugin('reader'), config: { executable: config.onlyOfficeBuilder || 'docbuilder', mode: config.onlyOfficeMode || 'native', image: config.onlyOfficeImage, fontsDir: config.onlyOfficeFontsDir, cacheVersion: config.previewCacheVersion, workers: config.previewWorkers ?? 1, timeoutMs: config.previewTimeoutMs ?? 120000, cacheDir: path.join(home, 'preview-cache'), maxFileBytes: config.maxPreviewBytes ?? 100 * 1024 ** 2 } },
   ] },
 ];

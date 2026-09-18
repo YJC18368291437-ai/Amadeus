@@ -3,6 +3,7 @@ import { readdir, lstat, mkdir } from 'node:fs/promises';
 import { sessionRoot, resolveWithin, HttpError, json, routeErrors } from './workspace.mjs';
 import { upload, download } from './transfer.mjs';
 import { inspectRemoval, removeConfirmed } from './remove.mjs';
+import { DEFAULT_MAX_TEXT_BYTES, readTextRequest, readTextSource, saveTextSource } from './source.mjs';
 export const inject = ['webServer', 'sessions'];
 export function apply(ctx, config = {}) {
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/cofolio/files', handler: routeErrors(async (req, res) => {
@@ -17,6 +18,15 @@ export function apply(ctx, config = {}) {
       return json(res, 200, await removeConfirmed(root, input, url.searchParams.get('version')));
     }
     if (req.method === 'GET' && url.pathname === '/cofolio/files/download') return download(root, input, req, res);
+    if (req.method === 'GET' && url.pathname === '/cofolio/files/source') {
+      return json(res, 200, await readTextSource(root, input, { maxBytes: config.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES }));
+    }
+    if (req.method === 'PUT' && url.pathname === '/cofolio/files/source') {
+      const maxBytes = config.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES;
+      if (Number(req.headers['content-length']) > maxBytes) throw new HttpError(413, 'Text file exceeds the configured size limit');
+      const text = await readTextRequest(req, { maxBytes });
+      return json(res, 200, await saveTextSource(root, input, text, url.searchParams.get('expectedVersion'), { maxBytes }));
+    }
     if (req.method === 'PUT' && url.pathname === '/cofolio/files/upload') {
       const maxBytes = config.maxUploadBytes ?? 1024 ** 3;
       if (Number(req.headers['content-length']) > maxBytes) throw new HttpError(413, 'Upload exceeds the configured file size limit');

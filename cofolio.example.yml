@@ -22,3 +22,5 @@ previewCacheVersion: '1'
 # workspace: /srv/cofolio-workspace
 maxUploadBytes: 1073741824
 maxPreviewBytes: 104857600
+# Maximum editable UTF-8 text file size (5 MiB).
+maxTextBytes: 5242880
