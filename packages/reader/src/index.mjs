@@ -36,7 +36,7 @@ export function apply(ctx, config = {}) {
     const originalInfo = await stat(original, { bigint: true });
     if (!originalInfo.isFile()) throw new HttpError(404, 'Document not found');
     if (!['.pdf', '.doc', '.docx', '.ppt', '.pptx'].includes(path.extname(original).toLowerCase())) throw new HttpError(415, 'Unsupported preview document');
-    if (originalInfo.size > BigInt(config.maxFileBytes ?? 100 * 1024 ** 2)) throw new HttpError(413, 'Document exceeds the preview size limit');
+    if (originalInfo.size > BigInt(config.maxFileBytes ?? 512 * 1024 ** 2)) throw new HttpError(413, 'Document exceeds the preview size limit');
     const version = fileVersion(originalInfo);
     if (url.searchParams.get('metadata') === '1') {
       url.searchParams.delete('metadata'); url.searchParams.set('version', version);
@@ -51,7 +51,7 @@ export function apply(ctx, config = {}) {
     const source = path.extname(original).toLowerCase() === '.pdf' ? original : await converter.convert(original);
     if (fileVersion(await stat(original, { bigint: true })) !== version) throw new HttpError(409, 'Document changed; reopen the preview');
     const info = await stat(source);
-    if (info.size > (config.maxFileBytes ?? 100 * 1024 ** 2)) throw new HttpError(413, 'Document exceeds the preview size limit');
+    if (info.size > (config.maxFileBytes ?? 512 * 1024 ** 2)) throw new HttpError(413, 'Document exceeds the preview size limit');
     const extension = path.extname(original);
     const filename = url.searchParams.get('download') === '1' ? path.basename(original, extension) + '.pdf' : undefined;
     await sendPdf(req, res, source, { filename });

@@ -128,7 +128,7 @@ previewWorkers: 1
 | `previewWorkers` | `1` | 同时转换数，1–4；任务完成后进程退出 |
 | `previewTimeoutMs` | `120000` | 转换超时，毫秒 |
 | `previewCacheVersion` | `'1'` | 原生转换器升级或字体更换后递增，使旧 PDF 失效 |
-| `maxPreviewBytes` | `104857600` | 原文档及输出 PDF 上限，100 MiB |
+| `maxPreviewBytes` | `536870912` | 原文档及输出 PDF 上限，512 MiB |
 | `maxUploadBytes` | `1073741824` | 单个上传文件上限，1 GiB |
 | `maxTextBytes` | `5242880` | 可编辑 UTF-8 文本上限，5 MiB |
 | `sessionHours` | `12` | WebSocket 登录凭据有效期 |

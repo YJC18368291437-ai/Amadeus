@@ -21,7 +21,7 @@ previewCacheVersion: '1'
 # Optional default workspace for new sessions (must already exist):
 # workspace: /srv/cofolio-workspace
 maxUploadBytes: 1073741824
-maxPreviewBytes: 104857600
+maxPreviewBytes: 536870912
 # Maximum editable UTF-8 text file size (5 MiB).
 maxTextBytes: 5242880
 # Optional TeX Live lookup executable for LaTeX packages not bundled with Amadeus.
