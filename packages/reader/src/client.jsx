@@ -122,9 +122,14 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
   }, []);
   useLayoutEffect(() => {
     const host = root.current?.parentElement;
-    if (!host) return;
+    const pane = host?.parentElement;
+    if (!host || !pane) return;
     host.setAttribute('data-cf-reader-host', '');
-    return () => host.removeAttribute('data-cf-reader-host');
+    pane.setAttribute('data-cf-reader-pane', '');
+    return () => {
+      host.removeAttribute('data-cf-reader-host');
+      pane.removeAttribute('data-cf-reader-pane');
+    };
   }, []);
   useEffect(() => {
     let closed = false;
