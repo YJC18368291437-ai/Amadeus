@@ -35,6 +35,14 @@ function AmadeusBrandMark({ size = 24, className }) {
 }
 function AmadeusBrandName() { return <span>Amadeus</span>; }
 function DirtyDot() { return <svg className="amadeus-dirty-dot" width="8" height="8" viewBox="0 0 8 8" aria-label="未保存"><circle cx="4" cy="4" r="3.5" fill="currentColor" /></svg>; }
+function installBrandFavicon() {
+  let link = document.querySelector('link[rel~="icon"]');
+  const created = !link;
+  if (!link) { link = document.createElement('link'); document.head.append(link); }
+  const previous = { rel: link.rel, type: link.type, href: link.href };
+  link.rel = 'icon'; link.type = 'image/png'; link.href = brandMark;
+  return () => { if (created) link.remove(); else Object.assign(link, previous); };
+}
 function replaceBrandSlot(ctx, name, Replacement) {
   let entry, Native;
   const install = () => {
@@ -770,6 +778,7 @@ export function apply(ctx) {
     ctx.sidebarRight.closeIn(request.sessionId, request.tab.id);
   };
   ctx.effect(() => () => { closeRoot.unmount(); closeHost.remove(); });
+  ctx.effect(installBrandFavicon);
   ctx.effect(() => ctx.sidebarRight.registerCloseHandler('text', (sessionId, tab) => {
     const key = closeKey(sessionId, tab.id);
     if (closeBypass.delete(key) || !editable(tab.contentId)) return;
