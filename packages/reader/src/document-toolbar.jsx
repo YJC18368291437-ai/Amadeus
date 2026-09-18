@@ -13,7 +13,7 @@ function UndoIcon({ redo = false }) {
 }
 
 function SidePreviewIcon() {
-  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7.5" y="3.5" width="10" height="13" rx="1.75"/><circle cx="6.25" cy="9.25" r="3.25"/><path d="m3.9 11.6-2.15 2.15"/></svg>;
+  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7.5 6V5.25A1.75 1.75 0 0 1 9.25 3.5h6.5a1.75 1.75 0 0 1 1.75 1.75v9.5a1.75 1.75 0 0 1-1.75 1.75h-6.5a1.75 1.75 0 0 1-1.75-1.75V12.5"/><path d="M11.5 3.5v13"/><circle cx="6.25" cy="9.25" r="3.25"/><path d="m3.9 11.6-2.15 2.15"/></svg>;
 }
 
 function WrapIcon({ active }) {
