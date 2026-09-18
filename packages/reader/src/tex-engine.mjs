@@ -60,7 +60,6 @@ class WorkerEngine {
   }
   compile() { return this.request(this.command); }
   close() {
-    this.worker?.postMessage({ cmd: 'grace' });
     this.worker?.terminate();
     this.worker = undefined;
     this.ready = undefined;
