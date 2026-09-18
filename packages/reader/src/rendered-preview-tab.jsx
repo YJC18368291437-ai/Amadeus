@@ -4,6 +4,7 @@ import { editorKind } from './editor-routing.mjs';
 import { parseEditableAddress } from './file-address.mjs';
 import { LatexPreview } from './latex-preview.jsx';
 import { MarkdownPreview } from './markdown-preview.jsx';
+import { PageControl } from './page-control.jsx';
 
 function PreviewBody({ address, tab, documentStore, texCompiler, renderLatexPdf }) {
   const { path, sessionId } = parseEditableAddress(address);
@@ -11,7 +12,7 @@ function PreviewBody({ address, tab, documentStore, texCompiler, renderLatexPdf 
   const record = documentStore.open(address);
   const snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
   const root = useRef(), printRef = useRef(), latexDownloadRef = useRef();
-  const [latexReady, setLatexReady] = useState(false);
+  const [latexReady, setLatexReady] = useState(false), [latexControls, setLatexControls] = useState(null);
   const onLatexReady = useCallback(value => setLatexReady(value), []);
   useEffect(() => { void record.load(); }, [record]);
   useEffect(() => {
@@ -29,8 +30,8 @@ function PreviewBody({ address, tab, documentStore, texCompiler, renderLatexPdf 
   }, []);
   const download = () => kind === 'markdown' ? printRef.current?.() : latexDownloadRef.current?.();
   return <section ref={root} className="cf-editor-shell" data-cf-path={path} data-cf-format={path.split('.').pop().toLowerCase()} data-cf-session={sessionId}>
-    <DocumentToolbar path={path} onDownload={download} downloadDisabled={kind === 'latex' && !latexReady} />
-    {snapshot.status === 'loading' || snapshot.status === 'idle' ? <div className="cf-editor-loading" role="status">正在加载…</div> : snapshot.status === 'error' ? <p className="cf-error" role="alert">{snapshot.error?.message}</p> : kind === 'markdown' ? <MarkdownPreview source={snapshot.base} path={path} printRef={printRef} /> : <LatexPreview source={snapshot.base} path={path} compiler={texCompiler} downloadRef={latexDownloadRef} onReady={onLatexReady} renderPdf={pdf => renderLatexPdf(pdf, { path, sessionId })} />}
+    <DocumentToolbar path={path} onDownload={download} downloadDisabled={kind === 'latex' && !latexReady}>{kind === 'latex' && latexControls && <><PageControl page={latexControls.page} total={latexControls.total} onChange={latexControls.go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => latexControls.zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => latexControls.zoom(.1)}>＋</button></>}</DocumentToolbar>
+    {snapshot.status === 'loading' || snapshot.status === 'idle' ? <div className="cf-editor-loading" role="status">正在加载…</div> : snapshot.status === 'error' ? <p className="cf-error" role="alert">{snapshot.error?.message}</p> : kind === 'markdown' ? <MarkdownPreview source={snapshot.base} path={path} printRef={printRef} /> : <LatexPreview source={snapshot.base} path={path} compiler={texCompiler} downloadRef={latexDownloadRef} onReady={onLatexReady} renderPdf={pdf => renderLatexPdf(pdf, { path, sessionId, onControlsChange: setLatexControls })} />}
   </section>;
 }
 

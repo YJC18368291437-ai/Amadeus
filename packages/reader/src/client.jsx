@@ -162,11 +162,22 @@ async function loadPdfPreview({ sessionId, path, format, signal, report }) {
   }
 }
 
-function GeneratedPdfPreview({ bytes, path, sessionId }) {
+function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange }) {
   const scroll = useRef();
-  const [preview, setPreview] = useState(), [scale, setScale] = useState(1), [error, setError] = useState('');
-  useCtrlWheelZoom(scroll, delta => setScale(current => clampZoom(current + delta, .25, 3)));
+  const pageGeometry = useRef([]), scrollFrame = useRef(), manualScale = useRef(false);
+  const [preview, setPreview] = useState(), [scale, setScale] = useState(1), [page, setPage] = useState(1), [error, setError] = useState('');
+  const zoom = useCallback(delta => {
+    manualScale.current = true;
+    setScale(current => clampZoom(current + delta, .25, 3));
+  }, []);
+  const go = useCallback(value => {
+    if (!preview) return;
+    const next = Math.max(1, Math.min(preview.pdf.numPages, Number(value) || 1));
+    setPage(next); scrollToPage(scroll.current, next);
+  }, [preview]);
+  useCtrlWheelZoom(scroll, zoom);
   useEffect(() => {
+    manualScale.current = false;
     const controller = new AbortController();
     const loading = getDocument({ data: bytes.slice(), cMapUrl: ASSETS + 'cmaps/', cMapPacked: true, standardFontDataUrl: ASSETS + 'standard_fonts/', wasmUrl: ASSETS + 'wasm/', isEvalSupported: false });
     loading.promise.then(async pdf => {
@@ -180,14 +191,41 @@ function GeneratedPdfPreview({ bytes, path, sessionId }) {
   useEffect(() => {
     if (!preview || !scroll.current) return;
     const observer = new ResizeObserver(entries => {
+      if (manualScale.current) return;
       const width = entries[0].contentRect.width;
       setScale(Math.min(1.4, Math.max(.25, (width - 32) / preview.pageSizes[0].width)));
     });
     observer.observe(scroll.current);
     return () => observer.disconnect();
   }, [preview]);
+  useLayoutEffect(() => {
+    const container = scroll.current;
+    if (!preview || !container) { pageGeometry.current = []; return; }
+    const viewport = container.getBoundingClientRect();
+    pageGeometry.current = [...container.querySelectorAll('[data-cf-page]')].map(element => {
+      const rect = element.getBoundingClientRect();
+      const top = container.scrollTop + rect.top - viewport.top;
+      return { page: Number(element.dataset.cfPage), top, bottom: top + rect.height };
+    });
+  }, [preview, scale]);
+  useEffect(() => {
+    if (!onControlsChange) return;
+    onControlsChange(preview ? { page, total: preview.pdf.numPages, go, zoom } : null);
+    return () => onControlsChange(null);
+  }, [go, onControlsChange, page, preview, zoom]);
+  useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
+  function onScroll() {
+    cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = requestAnimationFrame(() => {
+      const container = scroll.current;
+      if (!container) return;
+      const anchor = container.scrollTop + Math.min(container.clientHeight * .35, 240);
+      const next = currentPageAt(pageGeometry.current, anchor);
+      setPage(previous => previous === next ? previous : next);
+    });
+  }
   if (error) return <p className="cf-error" role="alert">{error}</p>;
-  return <div className="cf-pdf-scroll cf-generated-pdf" ref={scroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
+  return <div className="cf-pdf-scroll cf-generated-pdf" ref={scroll} onScroll={onScroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
 }
 
 function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible }) {
