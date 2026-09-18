@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { basicSetup } from 'codemirror';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { languageExtension } from './editor-language.mjs';
 
@@ -14,8 +14,8 @@ const cofolioTheme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground,.cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--dsw-alias-button-primary-fill) 22%, transparent) !important' },
 });
 
-export function CodeEditor({ path, value, onChange, onSave, scrollportRef }) {
-  const holder = useRef(), viewRef = useRef(), current = useRef(value), callbacks = useRef({ onChange, onSave });
+export function CodeEditor({ path, value, onChange, onSave, scrollportRef, wrap = true }) {
+  const holder = useRef(), viewRef = useRef(), wrapCompartment = useRef(), current = useRef(value), callbacks = useRef({ onChange, onSave });
   callbacks.current = { onChange, onSave };
 
   useEffect(() => {
@@ -24,6 +24,8 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef }) {
       const language = await languageExtension(path);
       if (disposed) return;
       const saveKey = { key: 'Mod-s', preventDefault: true, run() { void callbacks.current.onSave(); return true; } };
+      const wrapping = new Compartment();
+      wrapCompartment.current = wrapping;
       const view = new EditorView({
         parent: holder.current,
         state: EditorState.create({
@@ -32,6 +34,7 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef }) {
             basicSetup,
             language,
             cofolioTheme,
+            wrapping.of(wrap ? EditorView.lineWrapping : []),
             keymap.of([saveKey]),
             EditorView.updateListener.of(update => {
               if (!update.docChanged) return;
@@ -49,6 +52,7 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef }) {
       scrollportRef?.(null);
       viewRef.current?.destroy();
       viewRef.current = undefined;
+      wrapCompartment.current = undefined;
     };
   }, [path]);
 
@@ -58,6 +62,9 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef }) {
     current.current = value;
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
   }, [value]);
+  useEffect(() => {
+    if (viewRef.current && wrapCompartment.current) viewRef.current.dispatch({ effects: wrapCompartment.current.reconfigure(wrap ? EditorView.lineWrapping : []) });
+  }, [wrap]);
 
   return <div ref={holder} className="cf-code-editor" />;
 }

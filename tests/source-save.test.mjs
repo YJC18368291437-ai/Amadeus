@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { readTextSource, saveTextSource } from '../packages/files/src/source.mjs';
+import { readTextSource, saveTextSource, statTextSource } from '../packages/files/src/source.mjs';
 
 async function workspace(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cofolio-source-'));
@@ -28,6 +28,16 @@ test('loads UTF-8 text and saves only the expected version', async t => {
   assert.notEqual(saved.version, loaded.version);
   assert.equal(await readFile(path.join(root, 'notes.md'), 'utf8'), '# changed\n');
   await assert.rejects(saveTextSource(root, 'notes.md', '# stale', loaded.version), error => error.status === 409 && error.details.version === saved.version);
+});
+
+test('reports a lightweight text version without reading content', async t => {
+  const root = await workspace(t);
+  await writeFile(path.join(root, 'watch.md'), 'watch');
+  const metadata = await statTextSource(root, 'watch.md');
+  assert.equal(metadata.path, 'watch.md');
+  assert.equal(metadata.bytes, 5);
+  assert.equal(typeof metadata.version, 'string');
+  assert.equal('text' in metadata, false);
 });
 
 test('rejects oversized, binary, missing, escaped and symlinked sources', async t => {

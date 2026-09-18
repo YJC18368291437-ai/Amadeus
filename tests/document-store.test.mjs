@@ -96,3 +96,19 @@ test('failed conflict refresh clears the saving state', async () => {
   assert.equal(record.getSnapshot().saving, false);
   assert.equal(record.getSnapshot().error.status, 404);
 });
+
+test('clean records auto-refresh when the server version changes but dirty records do not', async () => {
+  let server = { text: 'one', version: 'v1', path: 'a.txt' };
+  const request = async url => url.includes('metadata=1')
+    ? response(200, { version: server.version, path: server.path, bytes: server.text.length })
+    : response(200, server);
+  const record = createDocumentStore({ request }).open(address);
+  await record.load();
+  server = { text: 'two', version: 'v2', path: 'a.txt' };
+  assert.equal(await record.check(), true);
+  assert.equal(record.getSnapshot().draft, 'two');
+  record.edit('mine');
+  server = { text: 'three', version: 'v3', path: 'a.txt' };
+  assert.equal(await record.check(), false);
+  assert.equal(record.getSnapshot().draft, 'mine');
+});

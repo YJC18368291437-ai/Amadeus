@@ -22,6 +22,14 @@ function encodeText(text, maxBytes) {
   return bytes;
 }
 
+export async function statTextSource(root, input, { maxBytes = DEFAULT_MAX_TEXT_BYTES } = {}) {
+  const target = await resolveWithin(root, input);
+  const info = await lstat(target);
+  if (!info.isFile()) throw new HttpError(400, 'Text source is not a regular file');
+  if (info.size > maxBytes) throw new HttpError(413, 'Text file exceeds the configured size limit');
+  return { path: path.relative(root, target).replaceAll('\\', '/'), bytes: info.size, version: versionOf(info) };
+}
+
 export async function readTextSource(root, input, { maxBytes = DEFAULT_MAX_TEXT_BYTES } = {}) {
   const target = await resolveWithin(root, input);
   const before = await lstat(target);

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
 import { CodeEditor } from './code-editor.jsx';
 import { ConflictModal } from './conflict-modal.jsx';
 import { DocumentToolbar } from './document-toolbar.jsx';
@@ -14,19 +15,27 @@ function downloadSource(address) {
   anchor.click();
 }
 
-export function TextEditorTab({ useTabInfo, documentStore, texCompiler, renderLatexPdf }) {
-  const { tab } = useTabInfo();
+export function TextEditorTab({ useTabInfo, documentStore, texCompiler, renderLatexPdf, onOpenPreviewBeside }) {
+  const { tab, panel } = useTabInfo();
   const address = tab.contentId;
   const { sessionId, path } = parseEditableAddress(address);
   const kind = editorKind(path);
   const record = documentStore.open(address);
   const snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
   const root = useRef(), printRef = useRef(), latexDownloadRef = useRef();
-  const [preview, setPreview] = useState(false), [latexReady, setLatexReady] = useState(false);
+  const [preview, setPreview] = useState(false), [latexReady, setLatexReady] = useState(false), [wrap, setWrap] = useState(true), [confirmReload, setConfirmReload] = useState(false);
   const onLatexReady = useCallback(value => setLatexReady(value), []);
 
   useEffect(() => { void record.load(); }, [record]);
   useEffect(() => { setPreview(false); setLatexReady(false); }, [address]);
+  useEffect(() => {
+    if (!tab.visible) return;
+    const check = () => { if (document.visibilityState === 'visible') void record.check(); };
+    check();
+    const timer = setInterval(check, 2000);
+    document.addEventListener('visibilitychange', check);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', check); };
+  }, [record, tab.visible]);
   useEffect(() => {
     if (!preview) return;
     const save = event => {
@@ -49,9 +58,14 @@ export function TextEditorTab({ useTabInfo, documentStore, texCompiler, renderLa
     return latexDownloadRef.current?.();
   }
   const previewDownloadDisabled = preview && kind === 'latex' && !latexReady;
+  function refresh() {
+    if (snapshot.dirty) setConfirmReload(true);
+    else void record.reload();
+  }
   return <section ref={root} className="cf-editor-shell" data-cf-path={path} data-cf-format={path.split('.').pop().toLowerCase()} data-cf-session={sessionId}>
-    <DocumentToolbar path={path} previewable={previewable} preview={preview} onTogglePreview={() => setPreview(value => !value)} onDownload={download} downloadDisabled={previewDownloadDisabled} />
-    {snapshot.status === 'loading' || snapshot.status === 'idle' ? <div className="cf-editor-loading" role="status">正在加载…</div> : snapshot.status === 'error' ? <p className="cf-error" role="alert">{snapshot.error?.message}</p> : preview && kind === 'markdown' ? <MarkdownPreview source={snapshot.draft} path={path} printRef={printRef} /> : preview && kind === 'latex' ? <LatexPreview source={snapshot.draft} path={path} compiler={texCompiler} downloadRef={latexDownloadRef} onReady={onLatexReady} renderPdf={pdf => renderLatexPdf(pdf, { path, sessionId })} /> : <CodeEditor path={path} value={snapshot.draft} onChange={record.edit} onSave={record.save} />}
+    <DocumentToolbar path={path} previewable={previewable} preview={preview} onTogglePreview={() => setPreview(value => !value)} onOpenBeside={previewable ? () => onOpenPreviewBeside({ address, panelId: panel.id }) : undefined} onDownload={download} downloadDisabled={previewDownloadDisabled} onRefresh={refresh} wrap={wrap} onToggleWrap={!preview ? () => setWrap(value => !value) : undefined} />
+    {snapshot.status === 'loading' || snapshot.status === 'idle' ? <div className="cf-editor-loading" role="status">正在加载…</div> : snapshot.status === 'error' ? <p className="cf-error" role="alert">{snapshot.error?.message}</p> : preview && kind === 'markdown' ? <MarkdownPreview source={snapshot.draft} path={path} printRef={printRef} /> : preview && kind === 'latex' ? <LatexPreview source={snapshot.draft} path={path} compiler={texCompiler} downloadRef={latexDownloadRef} onReady={onLatexReady} renderPdf={pdf => renderLatexPdf(pdf, { path, sessionId })} /> : <CodeEditor path={path} value={snapshot.draft} onChange={record.edit} onSave={record.save} wrap={wrap} />}
     <ConflictModal record={record} snapshot={snapshot} />
+    <Modal open={confirmReload} title="重新加载并放弃未保存修改？" closeLabel="关闭" onClose={() => setConfirmReload(false)} className="cf-modal" footer={<div className="cf-modal-actions"><Button onClick={() => setConfirmReload(false)}>取消</Button><Button variant="primary" onClick={() => { setConfirmReload(false); void record.reload(); }}>重新加载</Button></div>}><div className="cf-conflict-confirm" aria-hidden="true" /></Modal>
   </section>;
 }

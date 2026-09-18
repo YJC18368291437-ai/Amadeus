@@ -3,7 +3,7 @@ import { readdir, lstat, mkdir } from 'node:fs/promises';
 import { sessionRoot, resolveWithin, HttpError, json, routeErrors } from './workspace.mjs';
 import { upload, download } from './transfer.mjs';
 import { inspectRemoval, removeConfirmed } from './remove.mjs';
-import { DEFAULT_MAX_TEXT_BYTES, readTextRequest, readTextSource, saveTextSource } from './source.mjs';
+import { DEFAULT_MAX_TEXT_BYTES, readTextRequest, readTextSource, saveTextSource, statTextSource } from './source.mjs';
 export const inject = ['webServer', 'sessions'];
 export function apply(ctx, config = {}) {
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/cofolio/files', handler: routeErrors(async (req, res) => {
@@ -19,6 +19,7 @@ export function apply(ctx, config = {}) {
     }
     if (req.method === 'GET' && url.pathname === '/cofolio/files/download') return download(root, input, req, res);
     if (req.method === 'GET' && url.pathname === '/cofolio/files/source') {
+      if (url.searchParams.get('metadata') === '1') return json(res, 200, await statTextSource(root, input, { maxBytes: config.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES }));
       return json(res, 200, await readTextSource(root, input, { maxBytes: config.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES }));
     }
     if (req.method === 'PUT' && url.pathname === '/cofolio/files/source') {

@@ -21,7 +21,7 @@
 
 Office 阅读链路：**PPT/PPTX、DOC/DOCX → ONLYOFFICE Document Builder → PDF.js 页面与文字层**。原文件不修改。Excel 与 OCR 暂不接入。
 
-UTF-8 文本文件使用 CodeMirror 编辑，支持语法高亮、未保存标记和 `Ctrl/Cmd+S`。保存使用文件版本进行原子比较；发生冲突时可选择服务器版本、确认覆盖或在 `@codemirror/merge` 中逐段合并。相同文件的编辑与预览标签共享草稿和保存状态。
+UTF-8 文本文件使用 CodeMirror 编辑，支持语法高亮、自动换行、重新读取、未保存标记和 `Ctrl/Cmd+S`。保存使用文件版本进行原子比较；发生冲突时会先自动合并双方非重叠修改，再通过 `@codemirror/merge` 调整合并结果。相同文件的编辑与预览标签共享草稿和保存状态，可分栏同时查看源码与渲染；草稿未修改时，服务器或 agent 对文件的修改会自动刷新。
 
 Markdown 以安全模式解析，数学公式由浏览器 KaTeX 渲染，导出时打印同一份预览 DOM。LaTeX 由浏览器 SwiftLaTeX XeTeX/dvipdfmx WASM 编译为 PDF；首次使用时通过服务器 `kpsewhich` 从 TeX Live 构建匹配格式并缓存，支持 `ctexart`、中文字体和常用 TikZ。PDF、Word、PPT 下载的是 PDF 阅读版本，源文件模式下载原文本。
 

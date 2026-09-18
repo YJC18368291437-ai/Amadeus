@@ -21,8 +21,9 @@ import { createTexCompiler } from './tex-engine.mjs';
 import editorStyles from './editor.css';
 import previewStyles from './preview.css';
 import { cofolioKatexCss } from './markdown-preview.jsx';
+import { RenderedPreviewTab } from './rendered-preview-tab.jsx';
 
-export const inject = ['slots', 'documentPreviews', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
+export const inject = ['slots', 'documentPreviews', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
 const ASSETS = '/cofolio/reader-assets/';
 GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
 function sourcePath(address) {
@@ -388,13 +389,28 @@ export function apply(ctx) {
   const previewCache = createPreviewCache({ maxEntries: 6 });
   const documentStore = createDocumentStore();
   const texCompiler = createTexCompiler();
+  const renderedPreviewId = 'dsh-cofolio-rendered-preview', renderedPreviewKind = 'cofolio-rendered-preview';
   const PagedReader = props => <PagedTab {...props} cache={previewCache} />;
-  const Editor = props => <TextEditorTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={(pdf, info) => <GeneratedPdfPreview bytes={pdf} {...info} />} />;
+  const renderLatexPdf = (pdf, info) => <GeneratedPdfPreview bytes={pdf} {...info} />;
+  const openPreviewBeside = ({ address, panelId }) => {
+    const paneId = ctx.sidebarRight.split(panelId) ?? panelId;
+    ctx.sidebarRight.openTab(renderedPreviewKind, { paneId, params: { address } });
+  };
+  const Editor = props => <TextEditorTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={renderLatexPdf} onOpenPreviewBeside={openPreviewBeside} />;
+  const RenderedPreview = props => <RenderedPreviewTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={renderLatexPdf} />;
+  const PreviewTitleContent = ({ address }) => {
+    const record = documentStore.open(address), snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
+    return <span className="cf-dirty-title">{snapshot.dirty && <span className="cf-dirty-dot" aria-label="未保存" />}<span>{sourcePath(address).split('/').pop()} · 预览</span></span>;
+  };
+  const PreviewTitle = props => { const address = props.useTabInfo().tab.navigation.params?.address; return address ? <PreviewTitleContent address={address} /> : '预览'; };
   const editable = address => { try { return !!editorKind(sourcePath(address)); } catch { return false; } };
   ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
   const pagedId = 'dsh-cofolio-paged-reader';
+  ctx.effect(() => ctx.sidebarRightTabs.register({ id: renderedPreviewId, kind: renderedPreviewKind, priority: 'extension', title: () => '预览' }));
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: renderedPreviewId }, RenderedPreview)));
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({ name: 'sidebar.right.pane.tab.title', key: renderedPreviewId }, PreviewTitle)));
   ctx.effect(() => ctx.sidebarRightTabs.register({ id: pagedId, kind: 'cofolio-paged', priority: 'extension', patterns: ['*.pdf', '*.doc', '*.docx', '*.ppt', '*.pptx'], canOpen: address => { try { return new URL(address).host === 'file' && !!sourcePath(address); } catch { return false; } }, title: address => sourcePath(address).split('/').pop() }));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: pagedId }, PagedReader)));
   // Persisted layouts from 0.1.0 still contain native `text` tabs for PDFs and

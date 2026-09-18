@@ -17,7 +17,7 @@ export function createDocumentStore({ request = fetch } = {}) {
   function open(address) {
     if (records.has(address)) return records.get(address);
     const listeners = new Set();
-    let loadPromise;
+    let loadPromise, checkPromise;
     let snapshot = {
       address,
       status: 'idle',
@@ -59,6 +59,23 @@ export function createDocumentStore({ request = fetch } = {}) {
       return { kind: 'conflict' };
     }
 
+    async function check() {
+      if (snapshot.status !== 'ready' || snapshot.dirty || snapshot.saving) return false;
+      if (checkPromise) return checkPromise;
+      checkPromise = (async () => {
+        try {
+          const metadata = await jsonRequest(request, sourceRequestUrl(address, { metadata: '1' }));
+          if (metadata.version === snapshot.version || snapshot.dirty || snapshot.saving) return false;
+          const body = await jsonRequest(request, sourceRequestUrl(address));
+          if (snapshot.dirty || snapshot.saving) return false;
+          settle(body);
+          return true;
+        } catch { return false; }
+        finally { checkPromise = undefined; }
+      })();
+      return checkPromise;
+    }
+
     async function saveVersion(text, expectedVersion, base) {
       publish({ saving: true, error: null });
       try {
@@ -80,6 +97,7 @@ export function createDocumentStore({ request = fetch } = {}) {
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       getSnapshot() { return snapshot; },
       load,
+      check,
       reload() { return load({ force: true }); },
       edit(draft) { publish({ draft, dirty: draft !== snapshot.base, error: null }); },
       save() {
