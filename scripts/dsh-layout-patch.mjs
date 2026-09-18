@@ -3,12 +3,22 @@ import path from 'node:path';
 
 const ORIGINAL = 'const available = viewport - s - 400;';
 const COMPACT = 'const available = viewport - s - 320;';
+const ORIGINAL_TITLE = 'const productTitle = "DeepSeek Harness";';
+const AMADEUS_TITLE = 'const productTitle = "Amadeus";';
 
 export function compactConversationMinimum(source) {
-  if (source.includes(COMPACT)) return source;
-  const occurrences = source.split(ORIGINAL).length - 1;
-  if (occurrences !== 1) throw new Error(`Unsupported DSH layout build: expected one center-width rule, found ${occurrences}`);
-  return source.replace(ORIGINAL, COMPACT);
+  let patched = source;
+  if (!patched.includes(COMPACT)) {
+    const occurrences = patched.split(ORIGINAL).length - 1;
+    if (occurrences !== 1) throw new Error(`Unsupported DSH layout build: expected one center-width rule, found ${occurrences}`);
+    patched = patched.replace(ORIGINAL, COMPACT);
+  }
+  if (!patched.includes(AMADEUS_TITLE)) {
+    const occurrences = patched.split(ORIGINAL_TITLE).length - 1;
+    if (occurrences !== 1) throw new Error(`Unsupported DSH layout build: expected one product title, found ${occurrences}`);
+    patched = patched.replace(ORIGINAL_TITLE, AMADEUS_TITLE);
+  }
+  return patched;
 }
 
 export async function patchDshLayout(root) {

@@ -296,7 +296,7 @@ function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange, focusPa
     pageGeometry.current = [...container.querySelectorAll('[data-amadeus-page]')].map(element => {
       const rect = element.getBoundingClientRect();
       const top = container.scrollTop + rect.top - viewport.top;
-      return { page: Number(element.dataset.cfPage), top, bottom: top + rect.height };
+      return { page: Number(element.dataset.amadeusPage), top, bottom: top + rect.height };
     });
   }, [preview, scale]);
   useEffect(() => {
@@ -410,7 +410,7 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible,
     pageGeometry.current = [...container.querySelectorAll('[data-amadeus-page]')].map(element => {
       const rect = element.getBoundingClientRect();
       const top = container.scrollTop + rect.top - viewport.top;
-      return { page: Number(element.dataset.cfPage), top, bottom: top + rect.height };
+      return { page: Number(element.dataset.amadeusPage), top, bottom: top + rect.height };
     });
     updateCurrentPage();
   }, [preview, scale]);
@@ -517,7 +517,7 @@ function decorateAnnotationReferences(root, maximum) {
       const button = doc.createElement('button');
       button.type = 'button';
       button.className = 'amadeus-annotation-reference';
-      button.dataset.cfAnnotationRef = String(reference.number);
+      button.dataset.amadeusAnnotationRef = String(reference.number);
       button.setAttribute('aria-label', `查看注释 ${reference.number}`);
       button.textContent = `注释 ${reference.number}`;
       fragment.append(button);
@@ -545,7 +545,7 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
   const hideTimer = useRef();
   const reference = target => target instanceof Element ? target.closest('[data-amadeus-annotation-ref]') : null;
   const reveal = anchor => {
-    const number = Number(anchor.dataset.cfAnnotationRef);
+    const number = Number(anchor.dataset.amadeusAnnotationRef);
     const annotation = annotations[number - 1];
     if (!annotation) return;
     clearTimeout(hideTimer.current);
@@ -572,7 +572,7 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
     return () => observer.disconnect();
   }, [annotations.length, props.node]);
   if (annotations.length === 0) return <Native {...props} />;
-  return <div ref={root} className="amadeus-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.dataset.cfAnnotationRef); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
+  return <div ref={root} className="amadeus-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.dataset.amadeusAnnotationRef); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
 }
 let conversationHighlightTimer;
 function conversationTextRange(anchor, quote, source) {
@@ -702,13 +702,13 @@ function installSelection(ctx, store) {
     const file = element?.closest('[data-amadeus-path]');
     if (file) {
       const end = endElement?.closest('[data-amadeus-path]');
-      if (!end || end.dataset.cfPath !== file.dataset.cfPath) return close();
-      sessionId = file.dataset.cfSession;
-      source = { kind: 'file', path: file.dataset.cfPath, format: file.dataset.cfFormat };
-      if (file.dataset.cfPage) {
-        source.pageStart = Math.min(Number(file.dataset.cfPage), Number(end.dataset.cfPage));
-        source.pageEnd = Math.max(Number(file.dataset.cfPage), Number(end.dataset.cfPage));
-        source.pageCount = Number(file.dataset.cfPageCount);
+      if (!end || end.dataset.amadeusPath !== file.dataset.amadeusPath) return close();
+      sessionId = file.dataset.amadeusSession;
+      source = { kind: 'file', path: file.dataset.amadeusPath, format: file.dataset.amadeusFormat };
+      if (file.dataset.amadeusPage) {
+        source.pageStart = Math.min(Number(file.dataset.amadeusPage), Number(end.dataset.amadeusPage));
+        source.pageEnd = Math.max(Number(file.dataset.amadeusPage), Number(end.dataset.amadeusPage));
+        source.pageCount = Number(file.dataset.amadeusPageCount);
       }
     } else {
       const message = element?.closest('[data-chat-anchor-key]');
