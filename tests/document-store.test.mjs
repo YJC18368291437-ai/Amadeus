@@ -82,3 +82,17 @@ test('server and merged resolutions update every subscriber', async () => {
   assert.deepEqual(await record.saveMerge('combined'), { kind: 'saved' });
   assert.equal(record.getSnapshot().base, 'combined');
 });
+
+test('failed conflict refresh clears the saving state', async () => {
+  let read = 0;
+  const request = async (_url, init = {}) => {
+    if (!init.method && read++ === 0) return response(200, { text: 'base', version: 'v1', path: 'a.txt' });
+    if (init.method) return response(409, { error: 'changed' });
+    return response(404, { error: 'missing' });
+  };
+  const record = createDocumentStore({ request }).open(address);
+  await record.load(); record.edit('mine');
+  await assert.rejects(record.save(), error => error.status === 404);
+  assert.equal(record.getSnapshot().saving, false);
+  assert.equal(record.getSnapshot().error.status, 404);
+});

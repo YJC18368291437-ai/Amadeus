@@ -41,7 +41,7 @@ class WorkerEngine {
   flush() { this.post('flushcache'); }
   request(command = this.command) {
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { cleanup(); reject(new Error('TeX compilation timed out')); }, this.timeoutMs);
+      const timeout = setTimeout(() => { cleanup(); this.close(); const error = new Error('TeX compilation timed out'); error.name = 'TimeoutError'; reject(error); }, this.timeoutMs);
       const onMessage = event => {
         if (event.data?.cmd !== 'compile') return;
         cleanup();
@@ -131,7 +131,7 @@ export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpo
     compile(source) {
       if (cache.has(source)) return Promise.resolve(cache.get(source));
       if (pending.has(source)) return pending.get(source);
-      const job = chain.then(async () => {
+      let job = chain.then(async () => {
         await initialize();
         xetex.flush();
         xetex.write('swiftlatexxetex.fmt', formatBytes);
@@ -148,6 +148,10 @@ export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpo
         cache.set(source, result);
         while (cache.size > 4) cache.delete(cache.keys().next().value);
         return result;
+      });
+      job = job.catch(error => {
+        if (error.name === 'TimeoutError') { xetex.close(); dvipdfmx.close(); initializePromise = undefined; }
+        throw error;
       });
       chain = job.catch(() => {});
       pending.set(source, job);

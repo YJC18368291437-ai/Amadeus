@@ -352,7 +352,8 @@ function installSelection(ctx, store) {
     const range = selection.getRangeAt(0);
     const element = selection.anchorNode?.nodeType === 1 ? selection.anchorNode : selection.anchorNode?.parentElement;
     const endElement = selection.focusNode?.nodeType === 1 ? selection.focusNode : selection.focusNode?.parentElement;
-    if (element?.closest('textarea,input,[contenteditable="true"],.cf-annotations')) return close();
+    const editable = element?.closest('[contenteditable="true"]');
+    if (element?.closest('textarea,input,.cf-annotations') || (editable && !editable.closest('.cm-editor'))) return close();
     let source, sessionId;
     const file = element?.closest('[data-cf-path]');
     if (file) {

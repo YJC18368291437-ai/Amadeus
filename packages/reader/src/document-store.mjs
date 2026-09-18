@@ -66,7 +66,10 @@ export function createDocumentStore({ request = fetch } = {}) {
         settle(body);
         return { kind: 'saved' };
       } catch (error) {
-        if (error.status === 409) return refreshConflict(text, base);
+        if (error.status === 409) {
+          try { return await refreshConflict(text, base); }
+          catch (refreshError) { publish({ saving: false, error: refreshError }); throw refreshError; }
+        }
         publish({ saving: false, error });
         throw error;
       }
