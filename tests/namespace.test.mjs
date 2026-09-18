@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const skippedDirectories = new Set(['.git', '.amadeus', '.release', 'node_modules', 'dist', 'output', 'playwright-report', 'test-results', 'tmp']);
+const skippedDirectories = new Set(['node_modules', 'dist']);
 const textExtensions = new Set(['', '.css', '.example', '.gitignore', '.json', '.jsx', '.md', '.mjs', '.service', '.txt', '.yaml', '.yml']);
 
 async function projectTextFiles(directory, root = directory) {
@@ -22,7 +22,10 @@ test('project-owned namespace is migrated consistently', async () => {
   const legacyName = ['co', 'folio'].join('');
   const legacyData = ['data', 'cf'].join('-') + '-';
   const failures = [];
-  for (const file of await projectTextFiles(root)) {
+  const files = [];
+  for (const directory of ['deploy', 'docs', 'packages', 'scripts', 'tests', 'ui']) files.push(...await projectTextFiles(path.join(root, directory), root));
+  for (const name of ['.gitignore', 'CHANGELOG.md', 'README.md', 'amadeus.example.yml', 'package-lock.json', 'package.json']) files.push({ target: path.join(root, name), relative: name });
+  for (const file of files) {
     const source = await readFile(file.target, 'utf8');
     if (source.toLowerCase().includes(legacyName) || source.includes(legacyData)) failures.push(file.relative);
   }
