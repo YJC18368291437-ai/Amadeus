@@ -1,5 +1,5 @@
 [Unit]
-Description=CoFolio learning workspace (DeepSeek Harness)
+Description=Amadeus learning workspace (DeepSeek Harness)
 After=network-online.target
 Wants=network-online.target
 

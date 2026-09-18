@@ -1,5 +1,5 @@
 {
-  "name": "cofolio-workspace",
+  "name": "amadeus-workspace",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -40,12 +40,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/whyself/CoFolio.git"
+    "url": "https://github.com/whyself/Amadeus.git"
   },
   "keywords": [
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
-    "cofolio"
+    "amadeus"
   ]
 }

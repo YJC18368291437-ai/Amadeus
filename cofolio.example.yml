@@ -24,5 +24,5 @@ maxUploadBytes: 1073741824
 maxPreviewBytes: 104857600
 # Maximum editable UTF-8 text file size (5 MiB).
 maxTextBytes: 5242880
-# Optional TeX Live lookup executable for LaTeX packages not bundled with CoFolio.
+# Optional TeX Live lookup executable for LaTeX packages not bundled with Amadeus.
 # kpsewhich: /usr/bin/kpsewhich

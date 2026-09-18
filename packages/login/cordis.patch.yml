@@ -2,7 +2,7 @@
   disabled: true
 - insert:
     - id: cofolio-webserver
-      name: dsh-cofolio-login
+      name: dsh-amadeus-login
       inject: [webStartup]
       config:
         host: 0.0.0.0

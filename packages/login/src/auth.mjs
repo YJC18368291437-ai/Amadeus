@@ -17,7 +17,7 @@ export function sameOrigin(req) {
 }
 export function createAuth({ username, password, sessionHours = 12 }) {
   if (!username || !password || username.includes(':') || /[\r\n]/.test(username + password)) {
-    throw new Error('CoFolio requires a username and password in the server plugin YAML. Username cannot contain a colon.');
+    throw new Error('Amadeus requires a username and password in the server plugin YAML. Username cannot contain a colon.');
   }
   const expected = `${username}:${password}`;
   const key = randomBytes(32);
@@ -42,8 +42,8 @@ export function createAuth({ username, password, sessionHours = 12 }) {
   function guard(req, res) {
     const status = rejection(req);
     if (status) {
-      res.writeHead(status, { ...(status === 401 ? { 'WWW-Authenticate': 'Basic realm="CoFolio", charset="UTF-8"' } : {}), 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(status === 401 ? 'CoFolio: authentication required.' : 'CoFolio: cross-origin request refused.');
+      res.writeHead(status, { ...(status === 401 ? { 'WWW-Authenticate': 'Basic realm="Amadeus", charset="UTF-8"' } : {}), 'Cache-Control': 'no-store', 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(status === 401 ? 'Amadeus: authentication required.' : 'Amadeus: cross-origin request refused.');
       return false;
     }
     if (header(req, 'authorization') && res.setHeader) {

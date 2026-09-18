@@ -1,8 +1,8 @@
-# CoFolio
+# Amadeus
 
 ![dsh](https://img.shields.io/badge/dsh-0.1.6--alpha.1-536DFE)
 ![Node.js](https://img.shields.io/badge/Node.js-24%2B-43853D)
-![version](https://img.shields.io/badge/CoFolio-0.1.0-blue)
+![version](https://img.shields.io/badge/Amadeus-0.1.0-blue)
 
 面向学习资料阅读的 **DeepSeek Harness（dsh）插件集**。在自己的服务器上阅读文档、选中文字向 agent 提问，并管理项目文件。界面沿用 dsh 的样式与明暗主题。
 
@@ -12,10 +12,10 @@
 
 | 插件 | 功能 |
 | --- | --- |
-| `dsh-cofolio-login` | 浏览器原生账密登录；服务器 YAML 配置；认证后允许远程修改 dsh 设置 |
-| `dsh-cofolio-terminal` | 持久 WebSocket 输入与控制；高延迟时合并按键；保留原生输出通道 |
-| `dsh-cofolio-files` | 上传文件/文件夹、保留结构；文件下载、文件夹 ZIP；重名询问与删除确认 |
-| `dsh-cofolio-reader` | PDF、Word、PPT 分页阅读；CodeMirror 文本编辑；Markdown/LaTeX 预览、导出与来源注释 |
+| `dsh-amadeus-login` | 浏览器原生账密登录；服务器 YAML 配置；认证后允许远程修改 dsh 设置 |
+| `dsh-amadeus-terminal` | 持久 WebSocket 输入与控制；高延迟时合并按键；保留原生输出通道 |
+| `dsh-amadeus-files` | 上传文件/文件夹、保留结构；文件下载、文件夹 ZIP；重名询问与删除确认 |
+| `dsh-amadeus-reader` | PDF、Word、PPT 分页阅读；CodeMirror 文本编辑；Markdown/LaTeX 预览、导出与来源注释 |
 
 选区旁点击“添加到对话”，填写可选问题并点圆形勾确认；点击其他位置取消。多条注释收成一个小胶囊，悬浮展开；发送后胶囊位于消息上方。文件注释包含原文件路径和页码，对话注释包含原文与消息定位。
 
@@ -48,7 +48,7 @@ LaTeX 浏览器预览需要服务器提供 TeX Live 文件查询：
 sudo apt install texlive-xetex texlive-lang-chinese texlive-pictures texlive-latex-extra
 ```
 
-CoFolio 只通过 `kpsewhich` 读取所需格式、宏包和字体并缓存后传给浏览器 WASM，不在服务器执行用户的 `.tex` 文件。
+Amadeus 只通过 `kpsewhich` 读取所需格式、宏包和字体并缓存后传给浏览器 WASM，不在服务器执行用户的 `.tex` 文件。
 
 转换器路径为 `/opt/cofolio-onlyoffice/var/www/onlyoffice/documentserver/server/FileConverter/bin/docbuilder`。无需 LibreOffice、Python UNO、数据库或常驻编辑服务。解包目录约 2.1 GiB；只在转换期间运行 CLI，完成后退出。
 
@@ -59,8 +59,8 @@ CoFolio 只通过 `kpsewhich` 读取所需格式、宏包和字体并缓存后�
 ### 安装和启动
 
 ```bash
-git clone https://github.com/whyself/CoFolio.git
-cd CoFolio
+git clone https://github.com/whyself/Amadeus.git
+cd Amadeus
 npm ci
 npm run build
 cp cofolio.example.yml cofolio.local.yml
@@ -102,7 +102,7 @@ sudo journalctl -u cofolio -f
 
 ## 可选：Docker 按需转换
 
-CoFolio 仍直接在主机运行，仅转换任务使用 Docker。CoFolio 服务用户必须能访问 Docker daemon。
+Amadeus 仍直接在主机运行，仅转换任务使用 Docker。Amadeus 服务用户必须能访问 Docker daemon。
 
 ```bash
 docker pull onlyoffice/documentserver@sha256:3ab6ebc7c605e5a32b7ae3ff19daed4925090245acc8100ce2230bd766c88212
@@ -137,7 +137,7 @@ previewWorkers: 1
 
 浏览器 TeX 引擎随 reader 插件提供。服务器需要可执行的 `kpsewhich` 以及 XeTeX、中文和 TikZ TeX Live 包；TeX 文件会按需解析并缓存到 `<home>/preview-cache/texlive-cache`，浏览器生成的格式缓存在 IndexedDB。两类缓存均不包含用户文档。
 
-清理时先停止 CoFolio，只删除 `<home>/preview-cache` 内的内容，再启动。**不要删除整个 home**，其中保存会话和模型凭据。下次打开 Office 文件会重新转换。
+清理时先停止 Amadeus，只删除 `<home>/preview-cache` 内的内容，再启动。**不要删除整个 home**，其中保存会话和模型凭据。下次打开 Office 文件会重新转换。
 
 ## 阅读与权限边界
 

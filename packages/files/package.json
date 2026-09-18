@@ -1,5 +1,5 @@
 {
-  "name": "dsh-cofolio-files",
+  "name": "dsh-amadeus-files",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.mjs",
@@ -33,12 +33,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/whyself/CoFolio.git"
+    "url": "https://github.com/whyself/Amadeus.git"
   },
   "keywords": [
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
-    "cofolio"
+    "amadeus"
   ]
 }

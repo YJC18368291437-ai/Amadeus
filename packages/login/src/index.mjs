@@ -4,7 +4,7 @@ import { createAuth } from './auth.mjs';
 import { injectBrowserCompatibility } from './browser-compat.mjs';
 
 // Substitution is restricted to the webserver composition row; no global dsh files change.
-export default class CoFolioWebServer extends WebServer {
+export default class AmadeusWebServer extends WebServer {
   static Config = z.object({
     host: z.union([z.const('127.0.0.1'), z.const('0.0.0.0')]).default('0.0.0.0'),
     port: z.natural().max(65535).default(3080),

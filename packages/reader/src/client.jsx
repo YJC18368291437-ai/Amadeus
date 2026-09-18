@@ -24,10 +24,29 @@ import { cofolioKatexCss } from './markdown-preview.jsx';
 import { RenderedPreviewTab } from './rendered-preview-tab.jsx';
 import { useCtrlWheelZoom } from './wheel-zoom.jsx';
 import { clampZoom } from './zoom.mjs';
+import brandMark from '../assets/amadeus-brand-mark.png';
 
 export const inject = ['slots', 'documentPreviews', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
 const ASSETS = '/cofolio/reader-assets/';
 GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
+function AmadeusBrandMark({ size = 24 }) {
+  const mask = `url("${brandMark}") center / contain no-repeat`;
+  return <span aria-hidden="true" style={{ display: 'block', width: size, height: size, flex: 'none', color: 'inherit', backgroundColor: 'currentColor', WebkitMask: mask, mask }} />;
+}
+function AmadeusBrandName() { return <span>Amadeus</span>; }
+function DirtyDot() { return <svg className="cf-dirty-dot" width="8" height="8" viewBox="0 0 8 8" aria-label="未保存"><circle cx="4" cy="4" r="3.5" fill="currentColor" /></svg>; }
+function replaceBrandSlot(ctx, name, Replacement) {
+  let entry, Native;
+  const install = () => {
+    if (entry) return;
+    const candidate = ctx.slots.entries(name)[0];
+    if (!candidate) return;
+    entry = candidate; Native = candidate.component; candidate.component = Replacement;
+  };
+  install();
+  const unsubscribe = ctx.slots.subscribe(name, install);
+  return () => { unsubscribe(); if (entry?.component === Replacement) entry.component = Native; };
+}
 function sourcePath(address) {
   return parseEditableAddress(address).path;
 }
@@ -118,7 +137,7 @@ async function loadPdfPreview({ sessionId, path, format, signal, report }) {
     if (signal.aborted) throw new DOMException('Preview load was cancelled', 'AbortError');
     signal.removeEventListener('abort', abort);
     completed = true;
-    return { pdf, pageSizes, dispose: () => loading.destroy() };
+    return { pdf, pageSizes, version: metadata.version, dispose: () => loading.destroy() };
   } finally {
     stopPolling();
     if (!completed) await loading?.destroy().catch(() => {});
@@ -153,7 +172,7 @@ function GeneratedPdfPreview({ bytes, path, sessionId }) {
   return <div className="cf-pdf-scroll cf-generated-pdf" ref={scroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
 }
 
-function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
+function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible }) {
   const parsed = parseEditableAddress(resourceAddress), path = parsed.path, format = path.split('.').pop().toLowerCase();
   sessionId = parsed.sessionId;
   const cacheKey = `${sessionId}\n${resourceAddress}`;
@@ -204,6 +223,29 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
       unsubscribe(); handle.release();
     };
   }, [cache, cacheKey, attempt]);
+  useEffect(() => {
+    if (!visible || !preview?.version) return;
+    let stopped = false, running = false;
+    const check = async () => {
+      if (stopped || running || document.visibilityState !== 'visible') return;
+      running = true;
+      try {
+        const response = await fetch(`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`);
+        if (!response.ok) throw new Error((await response.json()).error);
+        const metadata = await response.json();
+        if (!stopped && metadata.version !== preview.version) {
+          stopped = true;
+          await cache.invalidate(cacheKey);
+          setAttempt(value => value + 1);
+        }
+      } catch (pollError) { if (!stopped) setError(pollError.message); }
+      finally { running = false; }
+    };
+    void check();
+    const timer = setInterval(check, 2000);
+    document.addEventListener('visibilitychange', check);
+    return () => { stopped = true; clearInterval(timer); document.removeEventListener('visibilitychange', check); };
+  }, [cache, cacheKey, path, preview?.version, sessionId, visible]);
   useLayoutEffect(() => {
     if (!preview || pendingScroll.current === undefined || !scroll.current) return;
     scroll.current.scrollTop = pendingScroll.current;
@@ -247,12 +289,8 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
     });
   }
   useCtrlWheelZoom(scroll, zoom);
-  function reload() {
-    void cache.invalidate(cacheKey);
-    setAttempt(n => n + 1);
-  }
   return <section ref={root} className="cf-reader">
-    <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><a className="cf-icon" href={`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a><button className="cf-icon" aria-label="重新加载预览" title="重新加载预览" onClick={reload}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16 7a6.5 6.5 0 1 0 .2 5.5"/><path d="M16 3v4h-4"/></svg></button>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
+    <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><a className="cf-icon" href={`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
     {error && <p className="cf-error" role="alert">{error}</p>}
     {!firstReady && !error && <PreviewLoading key={`${resourceAddress}:${attempt}`} {...progress} office={format !== 'pdf'} />}
     <div className="cf-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
@@ -260,7 +298,7 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
 }
 function PagedTab({ useTabInfo, sessionId, cache }) {
   const { tab } = useTabInfo();
-  return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} cache={cache} />;
+  return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} cache={cache} visible={tab.visible} />;
 }
 const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
 function AnnotationChip({ annotations }) {
@@ -388,6 +426,18 @@ function installSelection(ctx, store) {
   document.addEventListener('mouseup', detect); document.addEventListener('keyup', detect);
   return () => { document.removeEventListener('pointerdown', outsidePointerDown, true); document.removeEventListener('mouseup', detect); document.removeEventListener('keyup', detect); root.unmount(); host.remove(); };
 }
+function UnsavedClosePrompt({ request, onCancel, onClose }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const saveAndClose = async () => {
+    setBusy(true); setError('');
+    try {
+      const result = await request.record.save();
+      if (result.kind !== 'saved') throw new Error('文件存在保存冲突，请先处理冲突后再关闭。');
+      onClose(false);
+    } catch (saveError) { setError(saveError.message); setBusy(false); }
+  };
+  return <Modal open title="保存对文件的修改？" closeLabel="关闭" onClose={() => !busy && onCancel()} className="cf-modal" footer={<div className="cf-modal-actions"><Button disabled={busy} onClick={onCancel}>取消</Button><Button disabled={busy} onClick={() => onClose(true)}>不保存</Button><Button variant="primary" disabled={busy} onClick={saveAndClose}>{busy ? '保存中…' : '保存并关闭'}</Button></div>}><p className="cf-modal-path">{request.path}</p>{error && <p className="cf-error" role="alert">{error}</p>}</Modal>;
+}
 export function apply(ctx) {
   const store = createAnnotationStore(sessionStorage);
   const previewCache = createPreviewCache({ maxEntries: 6 });
@@ -404,10 +454,34 @@ export function apply(ctx) {
   const RenderedPreview = props => <RenderedPreviewTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={renderLatexPdf} />;
   const PreviewTitleContent = ({ address }) => {
     const record = documentStore.open(address), snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
-    return <span className="cf-dirty-title">{snapshot.dirty && <span className="cf-dirty-dot" aria-label="未保存" />}<span>{sourcePath(address).split('/').pop()} · 预览</span></span>;
+    return <span className="cf-dirty-title">{snapshot.dirty && <DirtyDot />}<span>{sourcePath(address).split('/').pop()} · 预览</span></span>;
   };
   const PreviewTitle = props => { const address = props.useTabInfo().tab.navigation.params?.address; return address ? <PreviewTitleContent address={address} /> : '预览'; };
   const editable = address => { try { return !!editorKind(sourcePath(address)); } catch { return false; } };
+  const closeHost = document.createElement('div'), closeRoot = createRoot(closeHost), closeBypass = new Set();
+  document.body.append(closeHost);
+  const closeKey = (sessionId, tabId) => `${sessionId}\n${tabId}`;
+  const dismissClosePrompt = () => closeRoot.render(null);
+  const finishClose = (request, discard) => {
+    if (discard) request.record.discard();
+    closeBypass.add(closeKey(request.sessionId, request.tab.id));
+    dismissClosePrompt();
+    ctx.sidebarRight.closeIn(request.sessionId, request.tab.id);
+  };
+  ctx.effect(() => () => { closeRoot.unmount(); closeHost.remove(); });
+  ctx.effect(() => ctx.sidebarRight.registerCloseHandler('text', (sessionId, tab) => {
+    const key = closeKey(sessionId, tab.id);
+    if (closeBypass.delete(key) || !editable(tab.contentId)) return;
+    const record = documentStore.open(tab.contentId);
+    if (!record.getSnapshot().dirty) return;
+    const request = { sessionId, tab, record, path: sourcePath(tab.contentId) };
+    closeRoot.render(<UnsavedClosePrompt request={request} onCancel={dismissClosePrompt} onClose={discard => finishClose(request, discard)} />);
+    const error = new Error('Unsaved changes require a close decision.');
+    error.name = 'AmadeusUnsavedClose';
+    throw error;
+  }));
+  ctx.effect(() => ctx.slots.inject('sidebar.brand.mark', () => replaceBrandSlot(ctx, 'sidebar.brand.mark', AmadeusBrandMark)));
+  ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
   ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
@@ -452,7 +526,7 @@ export function apply(ctx) {
       const EditableTitle = ({ address, ...props }) => {
         const record = documentStore.open(address);
         const snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
-        return <span className="cf-dirty-title">{snapshot.dirty && <span className="cf-dirty-dot" aria-label="未保存" />}<Native {...props} /></span>;
+        return <span className="cf-dirty-title">{snapshot.dirty && <DirtyDot />}<Native {...props} /></span>;
       };
       const DirtyTitle = props => { const { tab } = props.useTabInfo(); return editable(tab.contentId) ? <EditableTitle {...props} address={tab.contentId} /> : <Native {...props} />; };
       entry.component = DirtyTitle;

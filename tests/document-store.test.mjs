@@ -31,10 +31,24 @@ test('shares one load and synchronizes successful saves', async () => {
   first.edit('mine');
   assert.equal(second.getSnapshot().draft, 'mine');
   assert.equal(second.getSnapshot().dirty, true);
+  second.edit('base');
+  assert.equal(first.getSnapshot().dirty, false);
+  first.edit('mine');
   assert.deepEqual(await second.save(), { kind: 'saved' });
   assert.equal(first.getSnapshot().base, 'mine');
   assert.equal(first.getSnapshot().version, 'v2');
   assert.equal(first.getSnapshot().dirty, false);
+});
+
+test('discard restores the saved version and clears the dirty marker', async () => {
+  const request = async () => response(200, { text: 'saved', version: 'v1', path: 'a.txt' });
+  const record = createDocumentStore({ request }).open(address);
+  await record.load();
+  record.edit('draft');
+  assert.equal(record.getSnapshot().dirty, true);
+  record.discard();
+  assert.equal(record.getSnapshot().draft, 'saved');
+  assert.equal(record.getSnapshot().dirty, false);
 });
 
 test('captures browser and server versions on conflict and resolves with CAS', async () => {

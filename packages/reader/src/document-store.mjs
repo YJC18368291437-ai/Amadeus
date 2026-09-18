@@ -100,6 +100,7 @@ export function createDocumentStore({ request = fetch } = {}) {
       check,
       reload() { return load({ force: true }); },
       edit(draft) { publish({ draft, dirty: draft !== snapshot.base, error: null }); },
+      discard() { publish({ draft: snapshot.base, dirty: false, saving: false, error: null, conflict: null }); },
       save() {
         if (!snapshot.version) return load().then(() => record.save());
         if (!snapshot.dirty) return Promise.resolve({ kind: 'saved' });

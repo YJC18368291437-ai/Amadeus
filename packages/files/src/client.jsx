@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Button, Modal, FileTypeIcon, IconRefreshOutline16 } from '@deepseek-ai/dsh-client-ui-primitives';
+import { Button, Modal, FileTypeIcon } from '@deepseek-ai/dsh-client-ui-primitives';
 import styles from '../../../ui/cofolio.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 export const inject = ['slots', 'sidebarRightTabs'];
@@ -20,9 +20,10 @@ function Files({ sessionId, useTabInfo }) {
   const [root, setRoot] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState('');
   const [uploadTo, setUploadTo] = useState(null), [conflict, setConflict] = useState(null);
   const [removal, setRemoval] = useState(null), [removing, setRemoving] = useState(false), [checkingRemoval, setCheckingRemoval] = useState(null), [removeError, setRemoveError] = useState('');
-  const panel = useRef(), scrollArea = useRef();
+  const panel = useRef(), scrollArea = useRef(), expandedRef = useRef(expanded), polling = useRef(false);
   const files = useRef(), folder = useRef(), destination = useRef(''), controller = useRef(), conflictResolver = useRef();
   const generation = useRef(0);
+  expandedRef.current = expanded;
   async function load(path) {
     const current = generation.current;
     try { const data = await request(fileUrl('list', sessionId, path)); if (current !== generation.current) return; setRoot(data.root); setLevels(prev => ({ ...prev, [path]: data.entries })); }
@@ -30,12 +31,25 @@ function Files({ sessionId, useTabInfo }) {
   }
   useEffect(() => { generation.current++; setLevels({}); setExpanded(new Set([''])); setRemoval(null); setRemoving(false); setCheckingRemoval(null); setRemoveError(''); load(''); return () => { generation.current++; controller.current?.abort(); conflictResolver.current?.('cancel'); }; }, [sessionId]);
   useEffect(() => {
+    if (!tab.tab.visible) return;
+    let stopped = false;
+    const check = async () => {
+      if (stopped || polling.current || document.visibilityState !== 'visible') return;
+      polling.current = true;
+      try { await refresh(true); } finally { polling.current = false; }
+    };
+    void check();
+    const timer = setInterval(check, 2000);
+    document.addEventListener('visibilitychange', check);
+    return () => { stopped = true; clearInterval(timer); document.removeEventListener('visibilitychange', check); };
+  }, [sessionId, tab.tab.visible]);
+  useEffect(() => {
     const element = scrollArea.current;
     const measure = () => panel.current?.style.setProperty('--cf-file-scrollbar', `${element.offsetWidth - element.clientWidth}px`);
     const observer = new ResizeObserver(measure); observer.observe(element); measure();
     return () => observer.disconnect();
   }, []);
-  async function refresh() { setError(''); for (const path of expanded) await load(path); }
+  async function refresh(silent = false) { if (!silent) setError(''); for (const path of expandedRef.current) await load(path); }
   function toggle(path) { setExpanded(prev => { const next = new Set(prev); next.has(path) ? next.delete(path) : next.add(path); return next; }); if (!levels[path]) load(path); }
   async function uploadFiles(selected) {
     if (!selected.length) return;
@@ -110,7 +124,7 @@ function Files({ sessionId, useTabInfo }) {
     return <span className="cf-actions cf-file-actions">
       {directory ? <button className="cf-icon" title="上传文件或文件夹" aria-label={`上传到 ${path || '项目根目录'}`} disabled={!!busy || removing} onClick={() => setUploadTo(path)}><Arrow direction="up" /></button> : <span className="cf-action-placeholder" aria-hidden="true" />}
       <a className="cf-icon" href={fileUrl('download', sessionId, path)} title={directory ? '下载文件夹（ZIP）' : '下载文件'} aria-label={`下载 ${path || '项目'}`} download><Arrow direction="down" /></a>
-      {path ? <button className="cf-icon cf-file-remove" title={directory ? '删除文件夹' : '删除文件'} aria-label={`删除 ${path}`} disabled={!!busy || removing || checkingRemoval !== null} onClick={() => askRemoval(path)}><Trash /></button> : <button className="cf-icon" title="刷新" aria-label="刷新目录" onClick={refresh}><IconRefreshOutline16 /></button>}
+      {path && <button className="cf-icon cf-file-remove" title={directory ? '删除文件夹' : '删除文件'} aria-label={`删除 ${path}`} disabled={!!busy || removing || checkingRemoval !== null} onClick={() => askRemoval(path)}><Trash /></button>}
     </span>;
   }
   function tree(path) {

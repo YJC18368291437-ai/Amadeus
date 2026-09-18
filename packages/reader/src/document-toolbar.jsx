@@ -13,17 +13,13 @@ function UndoIcon({ redo = false }) {
 }
 
 function SidePreviewIcon() {
-  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 3.5h7a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5H9"/><path d="M9 3.5v13"/><circle cx="6" cy="9" r="3.5"/><path d="m3.5 11.5-2 2"/></svg>;
-}
-
-function RefreshIcon() {
-  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16 7a6.5 6.5 0 1 0 .2 5.5"/><path d="M16 3v4h-4"/></svg>;
+  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="7.5" y="3.5" width="10" height="13" rx="1.75"/><path d="M11.5 3.5v13"/><circle cx="6.25" cy="9.25" r="3.25"/><path d="m3.9 11.6-2.15 2.15"/></svg>;
 }
 
 function WrapIcon({ active }) {
   return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 5h14M3 9h10a3 3 0 0 1 0 6H9"/><path d="m11 12-3 3 3 3"/>{active && <path d="M3 13h3"/>}</svg>;
 }
 
-export function DocumentToolbar({ path, onUndo, undoDisabled = false, onRedo, redoDisabled = false, onOpenBeside, onSave, saveDisabled = false, saving = false, onDownload, downloadDisabled = false, onRefresh, wrap, onToggleWrap, children }) {
-  return <div className="cf-toolbar cf-document-toolbar"><span className="cf-ellipsis" title={path}>{path}</span>{onUndo && <button className="cf-icon" type="button" aria-label="撤销修改" title="撤销（Ctrl+Z）" disabled={undoDisabled} onClick={onUndo}><UndoIcon /></button>}{onRedo && <button className="cf-icon" type="button" aria-label="重做修改" title="重做（Ctrl+Y / Ctrl+Shift+Z）" disabled={redoDisabled} onClick={onRedo}><UndoIcon redo /></button>}{onOpenBeside && <button className="cf-icon" type="button" aria-label="编译并在右侧打开预览" title="编译并在右侧打开预览" onClick={onOpenBeside}><SidePreviewIcon /></button>}{onSave && <button className="cf-icon" type="button" aria-label={saving ? '正在保存文件' : '保存文件'} title={saving ? '保存中…' : '保存文件'} disabled={saveDisabled} onClick={onSave}><SaveIcon /></button>}<button className="cf-icon" type="button" aria-label="下载文件" title="下载文件" disabled={downloadDisabled} onClick={onDownload}><DownloadIcon /></button>{onRefresh && <button className="cf-icon" type="button" aria-label="重新读取文件" title="重新读取文件" onClick={onRefresh}><RefreshIcon /></button>}{onToggleWrap && <button className="cf-icon" type="button" aria-label={wrap ? '关闭自动换行' : '开启自动换行'} title={wrap ? '关闭自动换行' : '开启自动换行'} aria-pressed={wrap} onClick={onToggleWrap}><WrapIcon active={wrap} /></button>}{children}</div>;
+export function DocumentToolbar({ path, onUndo, undoDisabled = false, onRedo, redoDisabled = false, onOpenBeside, onSave, saveDisabled = false, saving = false, onDownload, downloadDisabled = false, wrap, onToggleWrap, children }) {
+  return <div className="cf-toolbar cf-document-toolbar"><span className="cf-ellipsis" title={path}>{path}</span>{onUndo && <button className="cf-icon" type="button" aria-label="撤销修改" title="撤销（Ctrl+Z）" disabled={undoDisabled} onClick={onUndo}><UndoIcon /></button>}{onRedo && <button className="cf-icon" type="button" aria-label="重做修改" title="重做（Ctrl+Y / Ctrl+Shift+Z）" disabled={redoDisabled} onClick={onRedo}><UndoIcon redo /></button>}{onOpenBeside && <button className="cf-icon" type="button" aria-label="编译并在右侧打开预览" title="编译并在右侧打开预览" onClick={onOpenBeside}><SidePreviewIcon /></button>}{onSave && <button className="cf-icon" type="button" aria-label={saving ? '正在保存文件' : '保存文件'} title={saving ? '保存中…' : '保存文件'} disabled={saveDisabled} onClick={onSave}><SaveIcon /></button>}<button className="cf-icon" type="button" aria-label="下载文件" title="下载文件" disabled={downloadDisabled} onClick={onDownload}><DownloadIcon /></button>{onToggleWrap && <button className="cf-icon" type="button" aria-label={wrap ? '关闭自动换行' : '开启自动换行'} title={wrap ? '关闭自动换行' : '开启自动换行'} aria-pressed={wrap} onClick={onToggleWrap}><WrapIcon active={wrap} /></button>}{children}</div>;
 }
