@@ -1,0 +1,108 @@
+import { sourceRequestUrl } from './file-address.mjs';
+
+async function jsonRequest(request, url, init) {
+  const response = await request(url, init);
+  const body = await response.json();
+  if (!response.ok) {
+    const error = new Error(body.error || `Request failed (${response.status})`);
+    Object.assign(error, body, { status: response.status });
+    throw error;
+  }
+  return body;
+}
+
+export function createDocumentStore({ request = fetch } = {}) {
+  const records = new Map();
+
+  function open(address) {
+    if (records.has(address)) return records.get(address);
+    const listeners = new Set();
+    let loadPromise;
+    let snapshot = {
+      address,
+      status: 'idle',
+      path: '',
+      base: '',
+      draft: '',
+      version: null,
+      dirty: false,
+      saving: false,
+      error: null,
+      conflict: null,
+    };
+    const publish = patch => {
+      snapshot = { ...snapshot, ...patch };
+      for (const listener of listeners) listener();
+    };
+    const settle = body => {
+      publish({ status: 'ready', path: body.path, base: body.text, draft: body.text, version: body.version, dirty: false, saving: false, error: null, conflict: null });
+    };
+
+    async function load({ force = false } = {}) {
+      if (!force && snapshot.status === 'ready') return snapshot;
+      if (loadPromise) return loadPromise;
+      publish({ status: 'loading', error: null });
+      loadPromise = jsonRequest(request, sourceRequestUrl(address)).then(body => {
+        settle(body);
+        return snapshot;
+      }, error => {
+        publish({ status: 'error', error, saving: false });
+        throw error;
+      }).finally(() => { loadPromise = undefined; });
+      return loadPromise;
+    }
+
+    async function refreshConflict(mine, base) {
+      const server = await jsonRequest(request, sourceRequestUrl(address));
+      const conflict = { base, mine, server: server.text, serverVersion: server.version };
+      publish({ status: 'ready', path: server.path, saving: false, error: null, conflict, dirty: true });
+      return { kind: 'conflict' };
+    }
+
+    async function saveVersion(text, expectedVersion, base) {
+      publish({ saving: true, error: null });
+      try {
+        const body = await jsonRequest(request, sourceRequestUrl(address, { expectedVersion }), { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: text });
+        settle(body);
+        return { kind: 'saved' };
+      } catch (error) {
+        if (error.status === 409) return refreshConflict(text, base);
+        publish({ saving: false, error });
+        throw error;
+      }
+    }
+
+    const record = {
+      address,
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+      getSnapshot() { return snapshot; },
+      load,
+      reload() { return load({ force: true }); },
+      edit(draft) { publish({ draft, dirty: draft !== snapshot.base, error: null }); },
+      save() {
+        if (!snapshot.version) return load().then(() => record.save());
+        if (!snapshot.dirty) return Promise.resolve({ kind: 'saved' });
+        return saveVersion(snapshot.draft, snapshot.version, snapshot.base);
+      },
+      keepMine() {
+        if (!snapshot.conflict) throw new Error('No file conflict to overwrite');
+        return saveVersion(snapshot.conflict.mine, snapshot.conflict.serverVersion, snapshot.conflict.server);
+      },
+      saveMerge(text) {
+        if (!snapshot.conflict) throw new Error('No file conflict to merge');
+        return saveVersion(text, snapshot.conflict.serverVersion, snapshot.conflict.server);
+      },
+      useServer() {
+        if (!snapshot.conflict) return;
+        const { server, serverVersion } = snapshot.conflict;
+        publish({ base: server, draft: server, version: serverVersion, dirty: false, saving: false, error: null, conflict: null });
+      },
+      setConflict(conflict) { publish({ conflict, dirty: true }); },
+      clearError() { publish({ error: null }); },
+    };
+    records.set(address, record);
+    return record;
+  }
+
+  return { open, has: address => records.has(address), clear: () => records.clear() };
+}
