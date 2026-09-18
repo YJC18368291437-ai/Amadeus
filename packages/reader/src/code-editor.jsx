@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { basicSetup } from 'codemirror';
+import { redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { languageExtension } from './editor-language.mjs';
@@ -16,11 +17,12 @@ const cofolioTheme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground,.cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--dsw-alias-button-primary-fill) 22%, transparent) !important' },
 });
 
-export function CodeEditor({ path, value, onChange, onSave, scrollportRef, wrap = true }) {
+export function CodeEditor({ path, value, onChange, onSave, scrollportRef, historyRef, onHistoryChange, wrap = true }) {
   const holder = useRef(), viewRef = useRef(), wrapCompartment = useRef(), current = useRef(value), callbacks = useRef({ onChange, onSave });
+  const historyState = useRef({ canUndo: false, canRedo: false });
   const [fontSize, setFontSize] = useState(13);
   useCtrlWheelZoom(holder, delta => setFontSize(currentSize => clampZoom(currentSize + delta * 10, 9, 32)));
-  callbacks.current = { onChange, onSave };
+  callbacks.current = { onChange, onSave, onHistoryChange };
 
   useEffect(() => {
     let disposed = false;
@@ -28,6 +30,12 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef, wrap 
       const language = await languageExtension(path);
       if (disposed) return;
       const saveKey = { key: 'Mod-s', preventDefault: true, run() { void callbacks.current.onSave(); return true; } };
+      const reportHistory = state => {
+        const next = { canUndo: undoDepth(state) > 0, canRedo: redoDepth(state) > 0 };
+        if (next.canUndo === historyState.current.canUndo && next.canRedo === historyState.current.canRedo) return;
+        historyState.current = next;
+        callbacks.current.onHistoryChange?.(next);
+      };
       const wrapping = new Compartment();
       wrapCompartment.current = wrapping;
       const view = new EditorView({
@@ -41,14 +49,18 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef, wrap 
             wrapping.of(wrap ? EditorView.lineWrapping : []),
             keymap.of([saveKey]),
             EditorView.updateListener.of(update => {
-              if (!update.docChanged) return;
-              current.current = update.state.doc.toString();
-              callbacks.current.onChange(current.current);
+              if (update.docChanged) {
+                current.current = update.state.doc.toString();
+                callbacks.current.onChange(current.current);
+              }
+              reportHistory(update.state);
             }),
           ],
         }),
       });
       viewRef.current = view;
+      if (historyRef) historyRef.current = { undo: () => undo(view), redo: () => redo(view) };
+      reportHistory(view.state);
       scrollportRef?.(view.scrollDOM);
     })();
     return () => {
@@ -56,6 +68,8 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef, wrap 
       scrollportRef?.(null);
       viewRef.current?.destroy();
       viewRef.current = undefined;
+      if (historyRef) historyRef.current = undefined;
+      historyState.current = { canUndo: false, canRedo: false };
       wrapCompartment.current = undefined;
     };
   }, [path]);

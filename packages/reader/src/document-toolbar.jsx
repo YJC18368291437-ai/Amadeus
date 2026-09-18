@@ -8,14 +8,12 @@ function SaveIcon() {
   return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 3h11l3 3v11H3Z"/><path d="M6 3v5h8V3M6 17v-6h8v6"/></svg>;
 }
 
-export function PreviewIcon({ active }) {
-  return active
-    ? <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 3h9l3 3v11H4Z"/><path d="M13 3v4h4M7 11h6M7 14h4"/></svg>
-    : <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M2.5 10s2.7-4.5 7.5-4.5 7.5 4.5 7.5 4.5-2.7 4.5-7.5 4.5S2.5 10 2.5 10Z"/><circle cx="10" cy="10" r="2.2"/></svg>;
+function UndoIcon({ redo = false }) {
+  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><g transform={redo ? 'translate(20 0) scale(-1 1)' : undefined}><path d="m7 6-4 4 4 4"/><path d="M3 10h8a5 5 0 0 1 5 5"/></g></svg>;
 }
 
 function SidePreviewIcon() {
-  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="2.5" y="3" width="15" height="14" rx="2"/><path d="M10 3v14M13 8.2s1.2-1.7 2.5-1.7S18 8.2 18 8.2 16.8 10 15.5 10 13 8.2 13 8.2Z" transform="translate(-1 1) scale(.75)"/></svg>;
+  return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 3.5h7a1.5 1.5 0 0 1 1.5 1.5v10a1.5 1.5 0 0 1-1.5 1.5H9"/><path d="M9 3.5v13"/><circle cx="6" cy="9" r="3.5"/><path d="m3.5 11.5-2 2"/></svg>;
 }
 
 function RefreshIcon() {
@@ -26,6 +24,6 @@ function WrapIcon({ active }) {
   return <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 5h14M3 9h10a3 3 0 0 1 0 6H9"/><path d="m11 12-3 3 3 3"/>{active && <path d="M3 13h3"/>}</svg>;
 }
 
-export function DocumentToolbar({ path, previewable = false, preview = false, onTogglePreview, onOpenBeside, onSave, saveDisabled = false, saving = false, onDownload, downloadDisabled = false, onRefresh, wrap, onToggleWrap, children }) {
-  return <div className="cf-toolbar cf-document-toolbar"><span className="cf-ellipsis" title={path}>{path}</span>{previewable && <button className="cf-icon" type="button" aria-label={preview ? '返回源文件' : '预览文件'} title={preview ? '返回源文件' : '预览文件'} onClick={onTogglePreview}><PreviewIcon active={preview} /></button>}{previewable && onOpenBeside && <button className="cf-icon" type="button" aria-label="在侧边打开预览" title="在侧边打开预览" onClick={onOpenBeside}><SidePreviewIcon /></button>}{onSave && <button className="cf-icon" type="button" aria-label={saving ? '正在保存文件' : '保存文件'} title={saving ? '保存中…' : '保存文件'} disabled={saveDisabled} onClick={onSave}><SaveIcon /></button>}<button className="cf-icon" type="button" aria-label="下载文件" title="下载文件" disabled={downloadDisabled} onClick={onDownload}><DownloadIcon /></button>{onRefresh && <button className="cf-icon" type="button" aria-label="重新读取文件" title="重新读取文件" onClick={onRefresh}><RefreshIcon /></button>}{onToggleWrap && <button className="cf-icon" type="button" aria-label={wrap ? '关闭自动换行' : '开启自动换行'} title={wrap ? '关闭自动换行' : '开启自动换行'} aria-pressed={wrap} onClick={onToggleWrap}><WrapIcon active={wrap} /></button>}{children}</div>;
+export function DocumentToolbar({ path, onUndo, undoDisabled = false, onRedo, redoDisabled = false, onOpenBeside, onSave, saveDisabled = false, saving = false, onDownload, downloadDisabled = false, onRefresh, wrap, onToggleWrap, children }) {
+  return <div className="cf-toolbar cf-document-toolbar"><span className="cf-ellipsis" title={path}>{path}</span>{onUndo && <button className="cf-icon" type="button" aria-label="撤销修改" title="撤销（Ctrl+Z）" disabled={undoDisabled} onClick={onUndo}><UndoIcon /></button>}{onRedo && <button className="cf-icon" type="button" aria-label="重做修改" title="重做（Ctrl+Y / Ctrl+Shift+Z）" disabled={redoDisabled} onClick={onRedo}><UndoIcon redo /></button>}{onOpenBeside && <button className="cf-icon" type="button" aria-label="编译并在右侧打开预览" title="编译并在右侧打开预览" onClick={onOpenBeside}><SidePreviewIcon /></button>}{onSave && <button className="cf-icon" type="button" aria-label={saving ? '正在保存文件' : '保存文件'} title={saving ? '保存中…' : '保存文件'} disabled={saveDisabled} onClick={onSave}><SaveIcon /></button>}<button className="cf-icon" type="button" aria-label="下载文件" title="下载文件" disabled={downloadDisabled} onClick={onDownload}><DownloadIcon /></button>{onRefresh && <button className="cf-icon" type="button" aria-label="重新读取文件" title="重新读取文件" onClick={onRefresh}><RefreshIcon /></button>}{onToggleWrap && <button className="cf-icon" type="button" aria-label={wrap ? '关闭自动换行' : '开启自动换行'} title={wrap ? '关闭自动换行' : '开启自动换行'} aria-pressed={wrap} onClick={onToggleWrap}><WrapIcon active={wrap} /></button>}{children}</div>;
 }

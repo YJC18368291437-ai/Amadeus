@@ -30,7 +30,7 @@ function PreviewBody({ address, tab, documentStore, texCompiler, renderLatexPdf 
   const download = () => kind === 'markdown' ? printRef.current?.() : latexDownloadRef.current?.();
   return <section ref={root} className="cf-editor-shell" data-cf-path={path} data-cf-format={path.split('.').pop().toLowerCase()} data-cf-session={sessionId}>
     <DocumentToolbar path={path} onDownload={download} downloadDisabled={kind === 'latex' && !latexReady} onRefresh={() => { if (!snapshot.dirty) void record.reload(); }} />
-    {snapshot.status === 'loading' || snapshot.status === 'idle' ? <div className="cf-editor-loading" role="status">正在加载…</div> : snapshot.status === 'error' ? <p className="cf-error" role="alert">{snapshot.error?.message}</p> : kind === 'markdown' ? <MarkdownPreview source={snapshot.draft} path={path} printRef={printRef} /> : <LatexPreview source={snapshot.draft} path={path} compiler={texCompiler} downloadRef={latexDownloadRef} onReady={onLatexReady} renderPdf={pdf => renderLatexPdf(pdf, { path, sessionId })} />}
+    {snapshot.status === 'loading' || snapshot.status === 'idle' ? <div className="cf-editor-loading" role="status">正在加载…</div> : snapshot.status === 'error' ? <p className="cf-error" role="alert">{snapshot.error?.message}</p> : kind === 'markdown' ? <MarkdownPreview source={snapshot.base} path={path} printRef={printRef} /> : <LatexPreview source={snapshot.base} path={path} compiler={texCompiler} downloadRef={latexDownloadRef} onReady={onLatexReady} renderPdf={pdf => renderLatexPdf(pdf, { path, sessionId })} />}
   </section>;
 }
 
