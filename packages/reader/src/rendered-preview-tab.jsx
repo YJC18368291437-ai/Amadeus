@@ -14,6 +14,7 @@ function PreviewBody({ address, tab, documentStore, texCompiler, renderLatexPdf 
   const root = useRef(), printRef = useRef(), latexDownloadRef = useRef();
   const [latexReady, setLatexReady] = useState(false), [latexControls, setLatexControls] = useState(null);
   const onLatexReady = useCallback(value => setLatexReady(value), []);
+  useEffect(() => record.retain(), [record]);
   useEffect(() => { void record.load(); }, [record]);
   useEffect(() => {
     if (!tab.visible) return;

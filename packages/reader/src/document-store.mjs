@@ -17,7 +17,7 @@ export function createDocumentStore({ request = fetch } = {}) {
   function open(address) {
     if (records.has(address)) return records.get(address);
     const listeners = new Set();
-    let loadPromise, checkPromise;
+    let loadPromise, checkPromise, savePromise, consumers = 0, wasRetained = false;
     let snapshot = {
       address,
       status: 'idle',
@@ -34,6 +34,7 @@ export function createDocumentStore({ request = fetch } = {}) {
     const publish = patch => {
       snapshot = { ...snapshot, ...patch };
       for (const listener of listeners) listener();
+      if (wasRetained && consumers === 0 && !snapshot.dirty && !snapshot.saving && records.get(address) === record) records.delete(address);
     };
     const settle = body => {
       publish({ status: 'ready', path: body.path, base: body.text, draft: body.text, version: body.version, dirty: false, saving: false, error: null, conflict: null });
@@ -81,11 +82,12 @@ export function createDocumentStore({ request = fetch } = {}) {
       publish({ saving: true, error: null });
       try {
         const body = await jsonRequest(request, sourceRequestUrl(address, { expectedVersion }), { method: 'PUT', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: text });
-        settle(body);
+        const draft = snapshot.draft === text ? body.text : snapshot.draft;
+        publish({ status: 'ready', path: body.path, base: body.text, draft, version: body.version, dirty: draft !== body.text, saving: false, error: null, conflict: null });
         return { kind: 'saved' };
       } catch (error) {
         if (error.status === 409) {
-          try { return await refreshConflict(text, base); }
+          try { return await refreshConflict(snapshot.draft, base); }
           catch (refreshError) { publish({ saving: false, error: refreshError }); throw refreshError; }
         }
         publish({ saving: false, error });
@@ -95,6 +97,7 @@ export function createDocumentStore({ request = fetch } = {}) {
 
     const record = {
       address,
+      retain() { wasRetained = true; consumers++; let active = true; return () => { if (!active) return; active = false; consumers--; if (consumers === 0 && !snapshot.dirty && !snapshot.saving) records.delete(address); }; },
       subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
       getSnapshot() { return snapshot; },
       load,
@@ -104,9 +107,11 @@ export function createDocumentStore({ request = fetch } = {}) {
       setPreviewing(previewing) { publish({ previewing: !!previewing }); },
       discard() { publish({ draft: snapshot.base, dirty: false, saving: false, error: null, conflict: null }); },
       save() {
+        if (savePromise) return savePromise.then(result => result.kind === 'saved' && snapshot.dirty && !snapshot.conflict ? record.save() : result);
         if (!snapshot.version) return load().then(() => record.save());
         if (!snapshot.dirty) return Promise.resolve({ kind: 'saved' });
-        return saveVersion(snapshot.draft, snapshot.version, snapshot.base);
+        savePromise = saveVersion(snapshot.draft, snapshot.version, snapshot.base).finally(() => { savePromise = undefined; });
+        return savePromise;
       },
       keepMine() {
         if (!snapshot.conflict) throw new Error('No file conflict to overwrite');

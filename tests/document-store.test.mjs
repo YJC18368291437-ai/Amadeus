@@ -40,6 +40,58 @@ test('shares one load and synchronizes successful saves', async () => {
   assert.equal(first.getSnapshot().dirty, false);
 });
 
+test('preserves edits made while a save request is in flight', async () => {
+  let finishSave;
+  const request = async (_url, init = {}) => {
+    if (!init.method) return response(200, { text: 'base', version: 'v1', path: 'a.txt' });
+    return new Promise(resolve => { finishSave = () => resolve(response(200, { text: init.body, version: 'v2', path: 'a.txt' })); });
+  };
+  const record = createDocumentStore({ request }).open(address);
+  const release = record.retain();
+  await record.load();
+  record.edit('submitted');
+  const saving = record.save();
+  record.edit('typed while saving');
+  finishSave();
+  assert.deepEqual(await saving, { kind: 'saved' });
+  assert.equal(record.getSnapshot().base, 'submitted');
+  assert.equal(record.getSnapshot().draft, 'typed while saving');
+  assert.equal(record.getSnapshot().dirty, true);
+  release();
+});
+
+test('serializes a second save requested during the first save', async () => {
+  const puts = [], pending = [];
+  const request = async (_url, init = {}) => {
+    if (!init.method) return response(200, { text: 'base', version: 'v1', path: 'a.txt' });
+    puts.push(init.body);
+    return new Promise(resolve => pending.push(() => resolve(response(200, { text: init.body, version: `v${puts.length + 1}`, path: 'a.txt' }))));
+  };
+  const record = createDocumentStore({ request }).open(address);
+  const release = record.retain();
+  await record.load(); record.edit('first');
+  const first = record.save();
+  record.edit('second');
+  const second = record.save();
+  assert.deepEqual(puts, ['first']);
+  pending.shift()(); await first;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(puts, ['first', 'second']);
+  pending.shift()(); await second;
+  assert.equal(record.getSnapshot().base, 'second');
+  assert.equal(record.getSnapshot().dirty, false);
+  release();
+});
+
+test('releases clean records after their last tab closes', async () => {
+  const store = createDocumentStore({ request: async () => response(200, { text: 'base', version: 'v1', path: 'a.txt' }) });
+  const record = store.open(address), release = record.retain();
+  await record.load();
+  assert.equal(store.has(address), true);
+  release();
+  assert.equal(store.has(address), false);
+});
+
 test('discard restores the saved version and clears the dirty marker', async () => {
   const request = async () => response(200, { text: 'saved', version: 'v1', path: 'a.txt' });
   const record = createDocumentStore({ request }).open(address);

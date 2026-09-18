@@ -28,6 +28,7 @@ export function TextEditorTab({ useTabInfo, documentStore, texCompiler, renderLa
   const [history, setHistory] = useState({ canUndo: false, canRedo: false }), [wrap, setWrap] = useState(true), [fontSize, setFontSize] = useState(13), [latexReady, setLatexReady] = useState(false), [latexControls, setLatexControls] = useState(null);
   const onLatexReady = useCallback(value => setLatexReady(value), []);
 
+  useEffect(() => record.retain(), [record]);
   useEffect(() => { void record.load(); }, [record]);
   useEffect(() => { setHistory({ canUndo: false, canRedo: false }); }, [address]);
   useEffect(() => {

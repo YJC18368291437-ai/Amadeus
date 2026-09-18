@@ -101,9 +101,9 @@ async function writeCachedFormat(key, bytes) {
   } catch {}
 }
 
-export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpoint = DEFAULT_TEXLIVE_ENDPOINT, timeoutMs = 120000, formatCacheKey = 'amadeus-xelatex-format-v1' } = {}) {
-  const xetex = new WorkerEngine({ script: `${assetBase}swiftlatexxetex.js`, command: 'compilelatex', timeoutMs });
-  const dvipdfmx = new WorkerEngine({ script: `${assetBase}swiftlatexdvipdfm.js`, command: 'compilepdf', timeoutMs });
+export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpoint = DEFAULT_TEXLIVE_ENDPOINT, timeoutMs = 120000, formatCacheKey = 'amadeus-xelatex-format-v1', engineFactory = options => new WorkerEngine(options) } = {}) {
+  const xetex = engineFactory({ script: `${assetBase}swiftlatexxetex.js`, command: 'compilelatex', timeoutMs });
+  const dvipdfmx = engineFactory({ script: `${assetBase}swiftlatexdvipdfm.js`, command: 'compilepdf', timeoutMs });
   let chain = Promise.resolve(), initializePromise, formatBytes;
   const cache = new Map(), pending = new Map();
   async function initialize() {
@@ -123,7 +123,10 @@ export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpo
         xetex.setEndpoint(texliveEndpoint);
       }
       await dviReady;
-    })();
+    })().catch(error => {
+      xetex.close(); dvipdfmx.close(); initializePromise = undefined; formatBytes = undefined;
+      throw error;
+    });
     return initializePromise;
   }
   return {
@@ -149,7 +152,7 @@ export function createTexCompiler({ assetBase = DEFAULT_ASSET_BASE, texliveEndpo
         return result;
       });
       job = job.catch(error => {
-        if (error.name === 'TimeoutError') { xetex.close(); dvipdfmx.close(); initializePromise = undefined; }
+        if (!(error instanceof TexCompileError)) { xetex.close(); dvipdfmx.close(); initializePromise = undefined; formatBytes = undefined; }
         throw error;
       });
       chain = job.catch(() => {});
