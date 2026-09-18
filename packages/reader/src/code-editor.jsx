@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { basicSetup } from 'codemirror';
 import { redo, redoDepth, undo, undoDepth } from '@codemirror/commands';
 import { Compartment, EditorState } from '@codemirror/state';
@@ -17,11 +17,10 @@ const cofolioTheme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground,.cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--dsw-alias-button-primary-fill) 22%, transparent) !important' },
 });
 
-export function CodeEditor({ path, value, onChange, onSave, scrollportRef, historyRef, onHistoryChange, wrap = true }) {
+export function CodeEditor({ path, value, onChange, onSave, scrollportRef, historyRef, onHistoryChange, fontSize, onFontSizeChange, wrap = true }) {
   const holder = useRef(), viewRef = useRef(), wrapCompartment = useRef(), current = useRef(value), callbacks = useRef({ onChange, onSave });
   const historyState = useRef({ canUndo: false, canRedo: false });
-  const [fontSize, setFontSize] = useState(13);
-  useCtrlWheelZoom(holder, delta => setFontSize(currentSize => clampZoom(currentSize + delta * 10, 9, 32)));
+  useCtrlWheelZoom(holder, delta => onFontSizeChange(currentSize => clampZoom(currentSize + delta * 10, 9, 32)));
   callbacks.current = { onChange, onSave, onHistoryChange };
 
   useEffect(() => {
