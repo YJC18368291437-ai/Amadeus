@@ -11,6 +11,11 @@ test('prompt separates exact selected text, comment and original page/path', () 
   assert.deepEqual(parseAnnotatedPrompt(prompt), { annotations: items, prompt: '请逐步解释' });
   assert.equal(parseAnnotatedPrompt('ordinary user text'), null);
 });
+test('annotations provide a useful request when the visible composer text is empty', () => {
+  const items = [{ text: 'selected', annotation: 'why', source: { kind: 'file', path: 'notes.pdf', pageStart: 1 } }];
+  const prompt = serializeAnnotations(items, '');
+  assert.deepEqual(parseAnnotatedPrompt(prompt), { annotations: items, prompt: '请回答以上注释中的问题。' });
+});
 test('session separation, editing, persistence and snapshot-only successful settlement', () => {
   const memory = new Map(); const storage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v) };
   const store = createAnnotationStore(storage);

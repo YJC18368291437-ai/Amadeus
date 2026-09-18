@@ -108,8 +108,8 @@ function Files({ sessionId, useTabInfo }) {
   }
   function actions(path, directory) {
     return <span className="cf-actions cf-file-actions">
-      <a className="cf-icon" href={fileUrl('download', sessionId, path)} title={directory ? '下载文件夹（ZIP）' : '下载文件'} aria-label={`下载 ${path || '项目'}`} download><Arrow direction="down" /></a>
       {directory ? <button className="cf-icon" title="上传文件或文件夹" aria-label={`上传到 ${path || '项目根目录'}`} disabled={!!busy || removing} onClick={() => setUploadTo(path)}><Arrow direction="up" /></button> : <span className="cf-action-placeholder" aria-hidden="true" />}
+      <a className="cf-icon" href={fileUrl('download', sessionId, path)} title={directory ? '下载文件夹（ZIP）' : '下载文件'} aria-label={`下载 ${path || '项目'}`} download><Arrow direction="down" /></a>
       {path ? <button className="cf-icon cf-file-remove" title={directory ? '删除文件夹' : '删除文件'} aria-label={`删除 ${path}`} disabled={!!busy || removing || checkingRemoval !== null} onClick={() => askRemoval(path)}><Trash /></button> : <button className="cf-icon" title="刷新" aria-label="刷新目录" onClick={refresh}><IconRefreshOutline16 /></button>}
     </span>;
   }

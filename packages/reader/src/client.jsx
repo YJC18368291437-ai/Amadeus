@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
@@ -10,6 +10,8 @@ import loadingStyles from './loading.css';
 import { PageControl } from './page-control.jsx';
 import pageControlStyles from './page-control.css';
 import { scrollToPage } from './scroll-page.mjs';
+import { createPreviewCache } from './preview-cache.mjs';
+import { currentPageAt, reconcileAnnotationDraft, stripAnnotationDraftMarker } from './reader-state.mjs';
 
 export const inject = ['slots', 'documentPreviews', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
 const ASSETS = '/cofolio/reader-assets/';
@@ -20,9 +22,10 @@ function sourcePath(address) {
   if (parts[1] !== 'session') throw new Error('Unsupported file address');
   return parts.slice(3).map(decodeURIComponent).join('/');
 }
-function PdfPage({ pdf, number, scale, path, format, sessionId, onRendered }) {
+function PdfPage({ pdf, number, scale, baseSize, path, format, sessionId, onRendered }) {
   const holder = useRef(), canvas = useRef(), text = useRef();
-  const [near, setNear] = useState(false), [size, setSize] = useState({ width: 600, height: 800 }), [error, setError] = useState('');
+  const [near, setNear] = useState(false), [error, setError] = useState('');
+  const size = { width: baseSize.width * scale, height: baseSize.height * scale };
   useEffect(() => {
     const observer = new IntersectionObserver(entries => setNear(entries[0].isIntersecting), { rootMargin: '900px' });
     observer.observe(holder.current); return () => observer.disconnect();
@@ -34,7 +37,6 @@ function PdfPage({ pdf, number, scale, path, format, sessionId, onRendered }) {
       const page = await pdf.getPage(number);
       if (cancelled) return;
       const viewport = page.getViewport({ scale });
-      setSize({ width: viewport.width, height: viewport.height });
       const ratio = Math.min(devicePixelRatio || 1, 2);
       const target = canvas.current;
       target.width = Math.floor(viewport.width * ratio); target.height = Math.floor(viewport.height * ratio);
@@ -53,67 +55,163 @@ function PdfPage({ pdf, number, scale, path, format, sessionId, onRendered }) {
     <canvas ref={canvas} /><div ref={text} className="textLayer" />{error && <p className="cf-error">{error}</p>}
   </div><div className="cf-page-label" style={{ width: size.width }}>第 {number} 页</div></>;
 }
-function PdfPreview({ resourceAddress, sessionId, scrollportRef }) {
+
+async function loadPdfPreview({ sessionId, path, format, signal, report }) {
+  report({ phase: 'prepare' });
+  const response = await fetch(`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`, { signal });
+  if (!response.ok) throw new Error((await response.json()).error);
+  const metadata = await response.json();
+  report({ phase: format === 'pdf' ? 'download' : 'convert' });
+  let pollTimer, polling = format !== 'pdf', loading, parsingFinished = false, completed = false;
+  const stopPolling = () => { polling = false; clearTimeout(pollTimer); };
+  if (polling) {
+    const poll = async () => {
+      try {
+        const progressResponse = await fetch(metadata.progressUrl, { signal });
+        if (!progressResponse.ok) { stopPolling(); return; }
+        const current = await progressResponse.json();
+        if (!polling || signal.aborted) return;
+        if (current.state === 'converting') report({ phase: 'convert', value: current.value, maximum: current.maximum });
+        if (current.state === 'ready' || current.state === 'error') stopPolling();
+      } catch { if (signal.aborted) stopPolling(); }
+      finally { if (polling && !signal.aborted) pollTimer = setTimeout(poll, 150); }
+    };
+    void poll();
+  }
+  try {
+    loading = getDocument({ url: metadata.url, withCredentials: true, disableStream: true, disableAutoFetch: true, rangeChunkSize: 64 * 1024, cMapUrl: ASSETS + 'cmaps/', cMapPacked: true, standardFontDataUrl: ASSETS + 'standard_fonts/', wasmUrl: ASSETS + 'wasm/', isEvalSupported: false });
+    const abort = () => { void loading.destroy(); };
+    signal.addEventListener('abort', abort, { once: true });
+    loading.onProgress = ({ loaded, total }) => {
+      if (!parsingFinished && loaded) { stopPolling(); report({ phase: 'download', loaded, total }); }
+    };
+    const pdf = await loading.promise;
+    stopPolling();
+    parsingFinished = true;
+    report({ phase: 'render' });
+    const pageSizes = new Array(pdf.numPages);
+    let cursor = 0;
+    async function inspectPages() {
+      while (!signal.aborted) {
+        const index = cursor++;
+        if (index >= pdf.numPages) return;
+        const page = await pdf.getPage(index + 1);
+        const viewport = page.getViewport({ scale: 1 });
+        pageSizes[index] = { width: viewport.width, height: viewport.height };
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(4, pdf.numPages) }, inspectPages));
+    if (signal.aborted) throw new DOMException('Preview load was cancelled', 'AbortError');
+    signal.removeEventListener('abort', abort);
+    completed = true;
+    return { pdf, pageSizes, dispose: () => loading.destroy() };
+  } finally {
+    stopPolling();
+    if (!completed) await loading?.destroy().catch(() => {});
+  }
+}
+
+function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache }) {
   const path = sourcePath(resourceAddress), format = path.split('.').pop().toLowerCase();
-  const [pdf, setPdf] = useState(), [error, setError] = useState(''), [scale, setScale] = useState(1), [page, setPage] = useState(1);
-  const scroll = useRef();
+  const cacheKey = `${sessionId}\n${resourceAddress}`;
+  const [preview, setPreview] = useState(), [error, setError] = useState(''), [scale, setScale] = useState(1), [page, setPage] = useState(1);
+  const scroll = useRef(), root = useRef(), entryRef = useRef(), pendingScroll = useRef(), scrollFrame = useRef(), pageGeometry = useRef([]);
   const [attempt, setAttempt] = useState(0), [progress, setProgress] = useState({ phase: 'prepare' }), [firstReady, setFirstReady] = useState(false);
-  const onRendered = useCallback((number, failure) => {
-    if (number !== 1) return;
+  const onRendered = useCallback((_number, failure) => {
     if (failure) setError(failure.message); else setFirstReady(true);
   }, []);
+  useLayoutEffect(() => {
+    const host = root.current?.parentElement;
+    if (!host) return;
+    host.setAttribute('data-cf-reader-host', '');
+    return () => host.removeAttribute('data-cf-reader-host');
+  }, []);
   useEffect(() => {
-    const abort = new AbortController(); let loading, closed = false, pollTimer, polling = true;
-    const stopPolling = () => { polling = false; clearTimeout(pollTimer); };
-    setPdf(undefined); setError(''); setProgress({ phase: 'prepare' }); setFirstReady(false); setPage(1);
-    (async () => {
-      const response = await fetch(`/cofolio/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`, { signal: abort.signal });
-      if (!response.ok) throw new Error((await response.json()).error);
-      const metadata = await response.json();
+    let closed = false;
+    setPreview(undefined); setError(''); setProgress({ phase: 'prepare' }); setFirstReady(false);
+    const handle = cache.open(cacheKey, ({ signal, report }) => loadPdfPreview({ sessionId, path, format, signal, report }));
+    const { entry } = handle;
+    entryRef.current = entry;
+    const sync = () => {
+      const snapshot = entry.getSnapshot();
+      setProgress(snapshot.progress);
+      if (snapshot.status === 'error') setError(snapshot.error?.message || '预览加载失败');
+    };
+    sync();
+    const unsubscribe = entry.subscribe(sync);
+    entry.promise.then(value => {
       if (closed) return;
-      setProgress({ phase: format === 'pdf' ? 'download' : 'convert' });
-      if (format !== 'pdf') {
-        const poll = async () => {
-          try {
-            const response = await fetch(metadata.progressUrl, { signal: abort.signal });
-            if (!response.ok) { stopPolling(); return; }
-            const current = await response.json();
-            if (closed || !polling) return;
-            if (current.state === 'converting') setProgress({ phase: 'convert', value: current.value, maximum: current.maximum });
-            if (current.state === 'ready' || current.state === 'error') stopPolling();
-          } catch { if (abort.signal.aborted) stopPolling(); }
-          finally { if (!closed && polling) pollTimer = setTimeout(poll, 150); }
-        };
-        void poll();
-      }
-      loading = getDocument({ url: metadata.url, withCredentials: true, disableStream: true, disableAutoFetch: true, rangeChunkSize: 64 * 1024, cMapUrl: ASSETS + 'cmaps/', cMapPacked: true, standardFontDataUrl: ASSETS + 'standard_fonts/', wasmUrl: ASSETS + 'wasm/', isEvalSupported: false });
-      let parsingFinished = false;
-      loading.onProgress = ({ loaded, total }) => { if (!closed && !parsingFinished && loaded) { stopPolling(); setProgress({ phase: 'download', loaded, total }); } };
-      const document = await loading.promise;
-      if (closed) return;
-      stopPolling();
-      parsingFinished = true;
-      setProgress({ phase: 'render' });
-      const first = await document.getPage(1);
-      setScale(Math.min(1.4, Math.max(0.25, ((scroll.current?.clientWidth || 640) - 32) / first.getViewport({ scale: 1 }).width)));
-      setPdf(document);
-    })().catch(error => { stopPolling(); if (!closed) setError(error.message); });
-    return () => { closed = true; stopPolling(); abort.abort(); loading?.destroy(); };
-  }, [resourceAddress, sessionId, attempt]);
-  function go(value) {
-    const next = Math.max(1, Math.min(pdf.numPages, Number(value) || 1));
-    setPage(next); scrollToPage(scroll.current, next);
+      const view = entry.getView();
+      const fitted = Math.min(1.4, Math.max(0.25, ((scroll.current?.clientWidth || 640) - 32) / value.pageSizes[0].width));
+      const nextScale = view.scale ?? fitted;
+      const nextPage = Math.max(1, Math.min(value.pdf.numPages, view.page ?? 1));
+      entry.setView({ scale: nextScale, page: nextPage });
+      setScale(nextScale); setPage(nextPage); setPreview(value);
+      pendingScroll.current = view.scrollTop ?? 0;
+    }).catch(loadError => { if (!closed && loadError.name !== 'AbortError') setError(loadError.message); });
+    return () => {
+      closed = true;
+      if (entryRef.current === entry) entryRef.current = undefined;
+      if (scroll.current) entry.setView({ scrollTop: scroll.current.scrollTop });
+      unsubscribe(); handle.release();
+    };
+  }, [cache, cacheKey, attempt]);
+  useLayoutEffect(() => {
+    if (!preview || pendingScroll.current === undefined || !scroll.current) return;
+    scroll.current.scrollTop = pendingScroll.current;
+    pendingScroll.current = undefined;
+  }, [preview]);
+  useLayoutEffect(() => {
+    const container = scroll.current;
+    if (!preview || !container) { pageGeometry.current = []; return; }
+    const viewport = container.getBoundingClientRect();
+    pageGeometry.current = [...container.querySelectorAll('[data-cf-page]')].map(element => {
+      const rect = element.getBoundingClientRect();
+      const top = container.scrollTop + rect.top - viewport.top;
+      return { page: Number(element.dataset.cfPage), top, bottom: top + rect.height };
+    });
+    updateCurrentPage();
+  }, [preview, scale]);
+  useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
+  function updateCurrentPage() {
+    const container = scroll.current;
+    if (!container) return;
+    const anchor = container.scrollTop + Math.min(container.clientHeight * .35, 240);
+    const next = currentPageAt(pageGeometry.current, anchor);
+    setPage(previous => previous === next ? previous : next);
+    entryRef.current?.setView({ page: next, scale, scrollTop: container.scrollTop });
   }
-  return <section className="cf-reader">
-    <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><button className="cf-icon" title="重新加载预览" onClick={() => setAttempt(n => n + 1)}>↻</button>{pdf && <><PageControl page={page} total={pdf.numPages} onChange={go} /><button className="cf-icon" title="缩小" onClick={() => setScale(s => Math.max(.25, s - .1))}>−</button><button className="cf-icon" title="放大" onClick={() => setScale(s => Math.min(3, s + .1))}>＋</button></>}</div>
+  function onScroll() {
+    cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = requestAnimationFrame(updateCurrentPage);
+  }
+  function go(value) {
+    if (!preview) return;
+    const next = Math.max(1, Math.min(preview.pdf.numPages, Number(value) || 1));
+    setPage(next); scrollToPage(scroll.current, next);
+    entryRef.current?.setView({ page: next, scale, scrollTop: scroll.current?.scrollTop ?? 0 });
+  }
+  function zoom(delta) {
+    setScale(current => {
+      const next = Math.max(.25, Math.min(3, current + delta));
+      entryRef.current?.setView({ scale: next, page, scrollTop: scroll.current?.scrollTop ?? 0 });
+      return next;
+    });
+  }
+  function reload() {
+    void cache.invalidate(cacheKey);
+    setAttempt(n => n + 1);
+  }
+  return <section ref={root} className="cf-reader">
+    <div className="cf-toolbar"><span className="cf-ellipsis" title={path}>{path}</span><button className="cf-icon" aria-label="重新加载预览" title="重新加载预览" onClick={reload}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M16 7a6.5 6.5 0 1 0 .2 5.5"/><path d="M16 3v4h-4"/></svg></button>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="cf-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="cf-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
     {error && <p className="cf-error" role="alert">{error}</p>}
     {!firstReady && !error && <PreviewLoading key={`${resourceAddress}:${attempt}`} {...progress} office={format !== 'pdf'} />}
-    <div className="cf-pdf-scroll" ref={element => { scroll.current = element; scrollportRef?.(element); }}>{pdf && Array.from({ length: pdf.numPages }, (_, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={pdf} number={index + 1} scale={scale} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
+    <div className="cf-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
   </section>;
 }
-function PagedTab({ useTabInfo, sessionId }) {
+function PagedTab({ useTabInfo, sessionId, cache }) {
   const { tab } = useTabInfo();
-  return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} />;
+  return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} cache={cache} />;
 }
 const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
 function AnnotationChip({ annotations }) {
@@ -142,12 +240,17 @@ function SentAnnotations({ node, renderMessageImages }) {
     </div>
   </section>;
 }
-function AnnotationDock({ sessionId, store }) {
+function AnnotationDock({ sessionId, store, useInput, inputActions }) {
   const items = useSyncExternalStore(store.subscribe, () => store.get(sessionId));
+  const draft = useInput(state => state.draft), phase = useInput(state => state.phase);
   const [editing, setEditing] = useState(null), [comment, setComment] = useState('');
   const [expanded, setExpanded] = useState(false), [pinned, setPinned] = useState(false), [position, setPosition] = useState({ left: 0, bottom: 0 });
   const summary = useRef(), hideTimer = useRef();
   const selected = items.find(item => item.id === editing);
+  useEffect(() => {
+    const next = reconcileAnnotationDraft({ annotations: items.length, draft, phase });
+    if (next !== null) inputActions.setDraft(next);
+  }, [draft, inputActions, items.length, phase]);
   function reveal() {
     clearTimeout(hideTimer.current);
     const rect = summary.current.getBoundingClientRect();
@@ -237,11 +340,14 @@ function installSelection(ctx, store) {
 }
 export function apply(ctx) {
   const store = createAnnotationStore(sessionStorage);
+  const previewCache = createPreviewCache({ maxEntries: 6 });
+  const PagedReader = props => <PagedTab {...props} cache={previewCache} />;
+  ctx.effect(() => () => { void previewCache.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
   const pagedId = 'dsh-cofolio-paged-reader';
   ctx.effect(() => ctx.sidebarRightTabs.register({ id: pagedId, kind: 'cofolio-paged', priority: 'extension', patterns: ['*.pdf', '*.doc', '*.docx', '*.ppt', '*.pptx'], canOpen: address => { try { return new URL(address).host === 'file' && !!sourcePath(address); } catch { return false; } }, title: address => sourcePath(address).split('/').pop() }));
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: pagedId }, PagedTab)));
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: pagedId }, PagedReader)));
   // Persisted layouts from 0.1.0 still contain native `text` tabs for PDFs and
   // Office files. Intercept these bodies before their full-file reader mounts.
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => {
@@ -255,7 +361,7 @@ export function apply(ctx) {
       const Compatible = props => {
         const { tab } = props.useTabInfo();
         const paged = /\.(pdf|docx?|pptx?)$/i.test(sourcePath(tab.contentId));
-        return paged ? <PagedTab {...props} /> : <Native {...props} />;
+        return paged ? <PagedReader {...props} /> : <Native {...props} />;
       };
       // Keep this native entry's exclusive child-slot declaration and injected
       // render helpers; a second registration cannot redeclare that child.
@@ -316,7 +422,8 @@ export function apply(ctx) {
     conversation.sendSession = async function(session, text, attachments, mode, signal) {
       const id = session.sessionId;
       const snapshot = [...store.get(id)];
-      const result = await original.call(this, session, serializeAnnotations(snapshot, text), attachments, mode, signal);
+      const visibleText = stripAnnotationDraftMarker(text);
+      const result = await original.call(this, session, serializeAnnotations(snapshot, visibleText), attachments, mode, signal);
       if (result.kind === 'success') store.settle(id, snapshot);
       return result;
     };
