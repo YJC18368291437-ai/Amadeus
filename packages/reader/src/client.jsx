@@ -109,6 +109,24 @@ function delayQueueDock(ctx) {
   const unsubscribe = ctx.slots.subscribe('conversation.input.dock', install);
   return () => { unsubscribe(); if (entry?.component === Delayed) entry.component = Native; };
 }
+function suppressDesktopUnavailable(ctx) {
+  let entry, Native, SidebarOnly;
+  const install = () => {
+    if (entry) return;
+    const candidate = ctx.slots.entries('conversation.chat.turnTail').find(row => row.options.locale === 'deliverables');
+    if (!candidate) return;
+    entry = candidate; Native = candidate.component;
+    SidebarOnly = props => {
+      const translate = props.t;
+      const t = (key, params) => key === 'presented.unavailable' ? '' : translate(key, params);
+      return <Native {...props} t={t} />;
+    };
+    candidate.component = SidebarOnly;
+  };
+  install();
+  const unsubscribe = ctx.slots.subscribe('conversation.chat.turnTail', install);
+  return () => { unsubscribe(); if (entry?.component === SidebarOnly) entry.component = Native; };
+}
 function sourcePath(address) {
   return parseEditableAddress(address).path;
 }
@@ -450,35 +468,36 @@ function PagedTab({ useTabInfo, sessionId, cache }) {
 const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
 function AnnotationChip({ annotations }) {
   const anchor = useRef(), timer = useRef();
-  const [expanded, setExpanded] = useState(false), [pinned, setPinned] = useState(false), [position, setPosition] = useState({});
+  const [expanded, setExpanded] = useState(false), [position, setPosition] = useState({});
   function reveal() {
     clearTimeout(timer.current);
     const rect = anchor.current.getBoundingClientRect();
     setPosition({ left: Math.max(8, Math.min(rect.left, innerWidth - 436)), ...(rect.top > 260 ? { bottom: innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }) });
     setExpanded(true);
   }
-  function leave() { if (!pinned) timer.current = setTimeout(() => setExpanded(false), 130); }
+  function leave() { timer.current = setTimeout(() => setExpanded(false), 80); }
   useEffect(() => () => clearTimeout(timer.current), []);
-  return <div className="cf-sent-summary"><button ref={anchor} className="cf-summary-chip cf-sent-chip" aria-label={`查看 ${annotations.length} 条已发送注释`} aria-expanded={expanded} onMouseEnter={reveal} onMouseLeave={leave} onFocus={reveal} onClick={() => { reveal(); setPinned(value => !value); }} onKeyDown={event => { if (event.key === 'Escape') { setExpanded(false); setPinned(false); } }}><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{annotations.length} 条注释</button>
+  return <div className="cf-sent-summary"><button ref={anchor} className="cf-summary-chip cf-sent-chip" aria-label={`查看 ${annotations.length} 条已发送注释`} aria-expanded={expanded} onMouseEnter={reveal} onMouseLeave={leave} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{annotations.length} 条注释</button>
     {expanded && <div className="cf-annotation-popover cf-sent-popover" style={position} role="region" aria-label="已发送注释详情" onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}><div className="cf-annotation-list">{annotations.map((item, index) => <article key={index} className="cf-hover-note"><span className="cf-note-number">{index + 1}。</span><div className="cf-note-copy"><span className="cf-note-label">所选文本：</span><blockquote>{denseText(item.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div></div>}
   </div>;
 }
 function SentAnnotations({ node, renderMessageImages }) {
   const { annotations, prompt } = node.data.cofolio;
+  const attachments = node.data.content.filter(block => ['image', 'file'].includes(block.type) && block.attachment);
   return <section className="cf-sent" aria-label="已发送的注释">
     <AnnotationChip annotations={annotations} />
-    <div className="cf-sent-message">
-    <p style={{ whiteSpace: 'pre-wrap' }}>{prompt}</p>
-    {node.data.content.filter(b => b.type === 'image' && b.attachment).map((b, index) => <React.Fragment key={index}>{renderMessageImages({ images: [{ attachment: b.attachment }], align: 'end', compact: true })}</React.Fragment>)}
-    {node.data.content.filter(b => b.type === 'file' && b.attachment).map((b, index) => <span key={index}>附件：{b.attachment.name}</span>)}
-    </div>
+    {(prompt || attachments.length > 0) && <div className="cf-sent-message">
+    {prompt && <p style={{ whiteSpace: 'pre-wrap' }}>{prompt}</p>}
+    {attachments.filter(b => b.type === 'image').map((b, index) => <React.Fragment key={index}>{renderMessageImages({ images: [{ attachment: b.attachment }], align: 'end', compact: true })}</React.Fragment>)}
+    {attachments.filter(b => b.type === 'file').map((b, index) => <span key={index}>附件：{b.attachment.name}</span>)}
+    </div>}
   </section>;
 }
 function AnnotationDock({ sessionId, store, useInput, inputActions }) {
   const items = useSyncExternalStore(store.subscribe, () => store.get(sessionId));
   const draft = useInput(state => state.draft), phase = useInput(state => state.phase);
   const [editing, setEditing] = useState(null), [comment, setComment] = useState('');
-  const [expanded, setExpanded] = useState(false), [pinned, setPinned] = useState(false), [position, setPosition] = useState({ left: 0, bottom: 0 });
+  const [expanded, setExpanded] = useState(false), [position, setPosition] = useState({ left: 0, bottom: 0 });
   const summary = useRef(), hideTimer = useRef();
   const selected = items.find(item => item.id === editing);
   useEffect(() => {
@@ -491,9 +510,9 @@ function AnnotationDock({ sessionId, store, useInput, inputActions }) {
     setPosition({ left: Math.max(8, Math.min(rect.left, innerWidth - 376)), bottom: Math.max(8, innerHeight - rect.top + 6) });
     setExpanded(true);
   }
-  function leave() { if (!pinned) hideTimer.current = setTimeout(() => setExpanded(false), 130); }
+  function leave() { hideTimer.current = setTimeout(() => setExpanded(false), 80); }
   useEffect(() => () => clearTimeout(hideTimer.current), []);
-  useEffect(() => { setExpanded(false); setPinned(false); setEditing(null); }, [sessionId]);
+  useEffect(() => { setExpanded(false); setEditing(null); }, [sessionId]);
   useEffect(() => {
     if (!items.length) return;
     const slot = summary.current?.closest('[data-slot="conversation.input.overlay"]');
@@ -503,8 +522,8 @@ function AnnotationDock({ sessionId, store, useInput, inputActions }) {
     return () => card.removeAttribute('data-cf-annotation-input');
   }, [items.length > 0]);
   return <><div className="cf-annotations cf-annotation-summary" aria-label="待发送注释">{items.length > 0 && <>
-    <div className="cf-summary-pill" onMouseEnter={reveal} onMouseLeave={leave}><button ref={summary} className="cf-summary-chip" aria-label={`${items.length} 条注释`} aria-expanded={expanded} onFocus={reveal} onClick={() => { reveal(); setPinned(value => !value); }} onKeyDown={event => { if (event.key === 'Escape') { setExpanded(false); setPinned(false); } }}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{items.length} 条注释</button><button className="cf-clear-notes" aria-label="清除全部注释" title="清除全部注释" onClick={() => { store.clear(sessionId); setExpanded(false); setPinned(false); }}>×</button></div>
-    {expanded && <div className="cf-annotation-popover" style={position} role="region" aria-label="全部注释" onMouseEnter={() => clearTimeout(hideTimer.current)} onMouseLeave={leave} onKeyDown={event => { if (event.key === 'Escape') { setExpanded(false); setPinned(false); } }}>
+    <div className="cf-summary-pill" onMouseEnter={reveal} onMouseLeave={leave}><button ref={summary} className="cf-summary-chip" aria-label={`${items.length} 条注释`} aria-expanded={expanded} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{items.length} 条注释</button><button className="cf-clear-notes" aria-label="清除全部注释" title="清除全部注释" onClick={() => { store.clear(sessionId); setExpanded(false); }}>×</button></div>
+    {expanded && <div className="cf-annotation-popover" style={position} role="region" aria-label="全部注释" onMouseEnter={() => clearTimeout(hideTimer.current)} onMouseLeave={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}>
       <div className="cf-annotation-list">{items.map((item, index) => <article key={item.id} className="cf-hover-note"><span className="cf-note-number">{index + 1}。</span><div className="cf-note-copy"><div className="cf-hover-note-title"><span>所选文本：</span><button className="cf-icon" aria-label={`编辑注释 ${index + 1}`} title="编辑" onClick={() => { setEditing(item.id); setComment(item.annotation); setExpanded(false); setPinned(false); }}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="m12.5 3.5 4 4M3 17l1-5L13.5 2.5a2.8 2.8 0 0 1 4 4L8 16Z"/></svg></button><button className="cf-icon" aria-label={`删除注释 ${index + 1}`} title="删除" onClick={() => store.remove(sessionId, item.id)}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12M8 8v6M12 8v6"/></svg></button></div><blockquote>{denseText(item.text)}</blockquote><span className="cf-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div>
     </div>}
   </>}</div>
@@ -633,6 +652,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.slots.inject('main.conversation', () => replaceConversationHeadline(ctx)));
   ctx.effect(() => ctx.slots.inject('root', () => reduceConversationMinimum(ctx)));
   ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => delayQueueDock(ctx)));
+  ctx.effect(() => ctx.slots.inject('conversation.chat.turnTail', () => suppressDesktopUnavailable(ctx)));
   ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
@@ -677,7 +697,8 @@ export function apply(ctx) {
       const EditableTitle = ({ address, ...props }) => {
         const record = documentStore.open(address);
         const snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
-        return <span className="cf-dirty-title">{snapshot.dirty && <DirtyDot />}<Native {...props} /></span>;
+        const name = sourcePath(address).split('/').pop();
+        return <span className="cf-dirty-title">{snapshot.dirty && <DirtyDot />}{snapshot.previewing ? <span>{name} · 预览</span> : <Native {...props} />}</span>;
       };
       const DirtyTitle = props => { const { tab } = props.useTabInfo(); return editable(tab.contentId) ? <EditableTitle {...props} address={tab.contentId} /> : <Native {...props} />; };
       entry.component = DirtyTitle;
@@ -733,15 +754,22 @@ export function apply(ctx) {
     return () => { unsubscribe(); for (const dispose of disposers) dispose(); };
   }));
   const conversation = ctx.conversation, original = conversation.sendSession;
+  let annotationSubmissions = 0;
   ctx.effect(() => {
     conversation.sendSession = async function(session, text, attachments, mode, signal) {
       const id = session.sessionId;
       const snapshot = [...store.get(id)];
       const visibleText = stripAnnotationDraftMarker(text);
-      const result = await original.call(this, session, serializeAnnotations(snapshot, visibleText), attachments, mode, signal);
-      if (result.kind === 'success') store.settle(id, snapshot);
-      return result;
+      const annotated = snapshot.length > 0;
+      if (annotated && annotationSubmissions++ === 0) document.body.setAttribute('data-cf-annotation-submitting', '');
+      try {
+        const result = await original.call(this, session, serializeAnnotations(snapshot, visibleText), attachments, mode, signal);
+        if (result.kind === 'success') store.settle(id, snapshot);
+        return result;
+      } finally {
+        if (annotated) setTimeout(() => { if (--annotationSubmissions === 0) document.body.removeAttribute('data-cf-annotation-submitting'); }, 250);
+      }
     };
-    return () => { conversation.sendSession = original; };
+    return () => { conversation.sendSession = original; annotationSubmissions = 0; document.body.removeAttribute('data-cf-annotation-submitting'); };
   });
 }

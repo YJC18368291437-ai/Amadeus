@@ -17,7 +17,7 @@ const cofolioTheme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground,.cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--dsw-alias-button-primary-fill) 22%, transparent) !important' },
 });
 
-export function CodeEditor({ path, value, onChange, onSave, scrollportRef, historyRef, onHistoryChange, fontSize, onFontSizeChange, wrap = true }) {
+export function CodeEditor({ path, value, onChange, onSave, scrollportRef, historyRef, onHistoryChange, fontSize, onFontSizeChange, wrap = true, hidden = false }) {
   const holder = useRef(), viewRef = useRef(), wrapCompartment = useRef(), current = useRef(value), callbacks = useRef({ onChange, onSave });
   const historyState = useRef({ canUndo: false, canRedo: false });
   useCtrlWheelZoom(holder, delta => onFontSizeChange(currentSize => clampZoom(currentSize + delta * 10, 9, 32)));
@@ -82,6 +82,7 @@ export function CodeEditor({ path, value, onChange, onSave, scrollportRef, histo
   useEffect(() => {
     if (viewRef.current && wrapCompartment.current) viewRef.current.dispatch({ effects: wrapCompartment.current.reconfigure(wrap ? EditorView.lineWrapping : []) });
   }, [wrap]);
+  useEffect(() => { if (!hidden) viewRef.current?.requestMeasure(); }, [hidden]);
 
-  return <div ref={holder} className="cf-code-editor" style={{ '--cf-editor-font-size': `${fontSize}px` }} />;
+  return <div ref={holder} className="cf-code-editor" style={{ '--cf-editor-font-size': `${fontSize}px` }} hidden={hidden} />;
 }

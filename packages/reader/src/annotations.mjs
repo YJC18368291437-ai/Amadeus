@@ -3,7 +3,7 @@ export function serializeAnnotations(annotations, prompt) {
   if (!annotations.length) return prompt;
   // Escape tag delimiters in data so quoted source text cannot close this envelope.
   const data = JSON.stringify(annotations.map(({ text, annotation, source }) => ({ text, annotation, source }))).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e');
-  return `# Response annotations:\n${ANNOTATION_INSTRUCTION}\n<response-annotations>\n${data}\n</response-annotations>\n\n## My request:\n${prompt || '请回答以上注释中的问题。'}`;
+  return `# Response annotations:\n${ANNOTATION_INSTRUCTION}\n<response-annotations>\n${data}\n</response-annotations>\n\n## My request:\n${prompt}`;
 }
 export function parseAnnotatedPrompt(text) {
   const prefix = `# Response annotations:\n${ANNOTATION_INSTRUCTION}\n<response-annotations>\n`;

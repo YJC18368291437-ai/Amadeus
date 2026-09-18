@@ -26,6 +26,7 @@ export function createDocumentStore({ request = fetch } = {}) {
       draft: '',
       version: null,
       dirty: false,
+      previewing: false,
       saving: false,
       error: null,
       conflict: null,
@@ -100,6 +101,7 @@ export function createDocumentStore({ request = fetch } = {}) {
       check,
       reload() { return load({ force: true }); },
       edit(draft) { publish({ draft, dirty: draft !== snapshot.base, error: null }); },
+      setPreviewing(previewing) { publish({ previewing: !!previewing }); },
       discard() { publish({ draft: snapshot.base, dirty: false, saving: false, error: null, conflict: null }); },
       save() {
         if (!snapshot.version) return load().then(() => record.save());

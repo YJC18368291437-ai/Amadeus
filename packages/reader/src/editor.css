@@ -7,4 +7,6 @@
 .cf-conflict-labels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:6px;color:var(--dsw-alias-label-tertiary);font:var(--dsw-font-xs-13)}
 .cf-conflict-merge{height:min(62vh,620px);min-height:320px;overflow:hidden;border:.5px solid var(--dsw-alias-border-l4);border-radius:12px}.cf-conflict-merge>.cm-mergeView{height:100%}.cf-conflict-merge .cm-editor{height:100%}
 .cf-conflict-actions{flex-wrap:wrap}.cf-conflict-confirm{height:1px}
+div:has(> [data-presented-files-row])>span:empty{display:none}
+body[data-cf-annotation-submitting] [data-submission-echo]{display:none}
 @media(max-width:720px){.cf-conflict-labels{gap:8px}.cf-conflict-merge{min-height:260px;height:55vh}.cf-conflict-actions{justify-content:stretch}.cf-conflict-actions>*{flex:1}}

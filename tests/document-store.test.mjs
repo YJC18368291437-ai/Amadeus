@@ -51,6 +51,19 @@ test('discard restores the saved version and clears the dirty marker', async () 
   assert.equal(record.getSnapshot().dirty, false);
 });
 
+test('preview mode is shared without changing the saved or draft text', async () => {
+  const request = async () => response(200, { text: 'saved', version: 'v1', path: 'a.md' });
+  const record = createDocumentStore({ request }).open(address);
+  await record.load();
+  record.edit('draft');
+  record.setPreviewing(true);
+  assert.equal(record.getSnapshot().previewing, true);
+  assert.equal(record.getSnapshot().base, 'saved');
+  assert.equal(record.getSnapshot().draft, 'draft');
+  record.setPreviewing(false);
+  assert.equal(record.getSnapshot().previewing, false);
+});
+
 test('captures browser and server versions on conflict and resolves with CAS', async () => {
   let sourceReads = 0, puts = 0;
   const request = async (_url, init = {}) => {
