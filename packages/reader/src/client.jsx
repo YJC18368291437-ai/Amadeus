@@ -29,9 +29,9 @@ import brandMark from '../assets/amadeus-brand-mark.png';
 export const inject = ['slots', 'documentPreviews', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
 const ASSETS = '/cofolio/reader-assets/';
 GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
-function AmadeusBrandMark({ size = 24 }) {
+function AmadeusBrandMark({ size = 24, className }) {
   const mask = `url("${brandMark}") center / contain no-repeat`;
-  return <span aria-hidden="true" style={{ display: 'block', width: size, height: size, flex: 'none', color: 'inherit', backgroundColor: 'currentColor', WebkitMask: mask, mask }} />;
+  return <span className={className} aria-hidden="true" style={{ display: 'block', width: size, height: size, flex: 'none', color: 'inherit', backgroundColor: 'currentColor', WebkitMask: mask, mask }} />;
 }
 function AmadeusBrandName() { return <span>Amadeus</span>; }
 function DirtyDot() { return <svg className="cf-dirty-dot" width="8" height="8" viewBox="0 0 8 8" aria-label="未保存"><circle cx="4" cy="4" r="3.5" fill="currentColor" /></svg>; }
@@ -482,6 +482,7 @@ export function apply(ctx) {
   }));
   ctx.effect(() => ctx.slots.inject('sidebar.brand.mark', () => replaceBrandSlot(ctx, 'sidebar.brand.mark', AmadeusBrandMark)));
   ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
+  ctx.effect(() => ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark' }, AmadeusBrandMark)));
   ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
   // Claim resources before the native document owner reads bytes-complete.
   // The native viewer remains in charge of ordinary text and code documents.
