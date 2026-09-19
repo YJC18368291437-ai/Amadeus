@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { patchDshLayout } from './dsh-layout-patch.mjs';
+import { createRuntimePatch } from './runtime-patch.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 await patchDshLayout(root);
 const configPath = path.resolve(process.env.AMADEUS_CONFIG || path.join(root, 'amadeus.local.yml'));
@@ -12,16 +13,7 @@ const config = yaml.load(await readFile(configPath, 'utf8'));
 if (!config?.username || !config?.password || config.password === 'CHANGE-ME') throw new Error('Set username/password in the private amadeus.local.yml before starting.');
 const home = path.resolve(config.home || path.join(root, '.amadeus/dsh-home'));
 await mkdir(home, { recursive: true, mode: 0o700 });
-const plugin = name => path.join(root, 'packages', name, 'dist/index.mjs').replaceAll('\\', '/');
-const patch = [
-  { id: 'webserver', disabled: true },
-  { insert: [
-    { id: 'amadeus-webserver', name: plugin('login'), inject: ['webStartup'], config: { host: config.host || '0.0.0.0', port: config.port ?? 3080, username: config.username, password: config.password, sessionHours: config.sessionHours ?? 12, compression: 'gzip', compressionLevel: 1, compressionThresholdBytes: 1024 } },
-    { id: 'amadeus-terminal', name: plugin('terminal') },
-    { id: 'amadeus-files', name: plugin('files'), config: { maxUploadBytes: config.maxUploadBytes ?? 1024 ** 3, maxTextBytes: config.maxTextBytes ?? 5 * 1024 ** 2 } },
-    { id: 'amadeus-reader', name: plugin('reader'), config: { executable: config.onlyOfficeBuilder || 'docbuilder', mode: config.onlyOfficeMode || 'native', image: config.onlyOfficeImage, fontsDir: config.onlyOfficeFontsDir, cacheVersion: config.previewCacheVersion, workers: config.previewWorkers ?? 1, timeoutMs: config.previewTimeoutMs ?? 120000, cacheDir: path.join(home, 'preview-cache'), maxFileBytes: config.maxPreviewBytes ?? 512 * 1024 ** 2, kpsewhich: config.kpsewhich || 'kpsewhich' } },
-  ] },
-];
+const patch = createRuntimePatch({ root, home, config });
 const patchPath = path.join(home, 'amadeus.cordis.patch.yml');
 await writeFile(patchPath, yaml.dump(patch), { mode: 0o600 });
 const cli = path.join(root, 'node_modules/@deepseek-ai/dsh/lib/bin.js');

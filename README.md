@@ -7,7 +7,7 @@
 <p align="center">扩展 DSH 的文档查看、文本编辑与选区对话能力</p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-4d6bfe">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.0.1-4d6bfe">
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24%2B-43853D">
   <img alt="DSH" src="https://img.shields.io/badge/DSH-0.1.6--alpha.1-536DFE">
 </p>
@@ -165,10 +165,10 @@ npm run pack:plugins
 
 打包结果位于 `.release/`：
 
-- `dsh-amadeus-login-1.0.0.tgz`
-- `dsh-amadeus-terminal-1.0.0.tgz`
-- `dsh-amadeus-files-1.0.0.tgz`
-- `dsh-amadeus-reader-1.0.0.tgz`
+- `dsh-amadeus-login-1.0.1.tgz`
+- `dsh-amadeus-terminal-1.0.1.tgz`
+- `dsh-amadeus-files-1.0.1.tgz`
+- `dsh-amadeus-reader-1.0.1.tgz`
 
 代码结构：
 
