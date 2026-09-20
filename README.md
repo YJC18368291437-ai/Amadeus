@@ -31,6 +31,7 @@ Amadeus 是一组面向单用户服务器工作台的 DSH 插件。它把项目�
 | 文件管理 | 文件和文件夹上传、ZIP 下载、重名确认、删除确认、目录轮询与服务器变更自动刷新 |
 | 终端 | 持久 WebSocket 连接、高延迟输入合并、会话恢复与 Amadeus 默认工作目录 |
 | 远程访问 | 浏览器原生 Basic 认证、HTTPS 反向代理、登录后完整 DSH 设置能力 |
+| 浏览器自动化 | Playwright MCP 浏览器操作，模型原生支持网页导航、点击、填表、截图、无障碍 DOM 快照与 JS 执行，启动自检自动拉取资源 |
 
 ## 工作方式
 
@@ -117,6 +118,26 @@ sudo apt install texlive-xetex texlive-lang-chinese texlive-pictures texlive-lat
 
 浏览器首次编译时会下载并缓存格式、宏包和字体，因此耗时较长。后续编译复用 IndexedDB 和服务器的 TeX Live 缓存。用户 `.tex` 文件不会在服务器执行。
 
+## Playwright MCP 浏览器自动化
+
+Amadeus 默认启用 Playwright MCP 服务。模型可直接调用 `mcp__playwright__browser_*` 工具与 Web 页面交互（访问网页、点击、填表、截图、提取无障碍快照等）。
+
+启动时若未检测到 Chromium 内核，Amadeus 会自动拉取所需资源。Linux 云服务器可一键补齐所需系统动态链接库（`.so`）：
+
+```bash
+npm run setup:browsers
+```
+
+如需关闭或定制内核，可在 `amadeus.local.yml` 中设置：
+
+```yaml
+playwrightMcp:
+  enabled: true       # 设为 false 可完全禁用
+  browser: chromium   # 可选 chromium, chrome, msedge, firefox, webkit
+  headless: true      # 服务器环境无头运行
+  noSandbox: false    # Linux 容器或 root 运行时自动开启
+```
+
 ## systemd 与 HTTPS
 
 仓库提供 [systemd 模板](deploy/amadeus.service) 和 [nginx 模板](deploy/nginx.conf.example)。模板默认使用 `/srv/amadeus` 与 `amadeus` 服务用户：
@@ -143,6 +164,8 @@ sudo journalctl -u amadeus.service -f
 | `maxUploadBytes` | `1073741824` | 单文件上传上限，1 GiB |
 | `maxTextBytes` | `5242880` | 可编辑 UTF-8 文本上限，5 MiB |
 | `sessionHours` | `12` | 登录 WebSocket 凭据有效期 |
+| `playwrightMcp.enabled` | `true` | 是否启用 Playwright MCP 浏览器自动化 |
+| `playwrightMcp.browser` | `'chromium'` | 默认浏览器，可选 chrome, msedge 等 |
 
 默认数据目录为 `<项目>/.amadeus/dsh-home`，默认预览缓存位于 `<home>/preview-cache`。清理缓存时先停止服务，只删除 `preview-cache` 内容。
 

@@ -26,3 +26,18 @@ maxPreviewBytes: 536870912
 maxTextBytes: 5242880
 # Optional TeX Live lookup executable for LaTeX packages not bundled with Amadeus.
 # kpsewhich: /usr/bin/kpsewhich
+
+# Playwright MCP browser automation support (enabled by default).
+# Automatically checks and downloads chromium on startup if not present.
+# To disable, set `enabled: false`.
+# playwrightMcp:
+#   enabled: true
+#   browser: chromium # chromium (default), chrome, msedge, firefox, webkit
+#   headless: true
+#   noSandbox: false # automatically enabled when running as root or in containers on Linux
+#   timeoutMs: 60000
+#   idleTimeoutMs: 600000 # 10 minutes idle timeout to automatically release browser memory
+#   allowUnrestrictedFileAccess: false
+#   # Custom executable/args override (optional):
+#   # command: playwright-mcp
+#   # args: ['--headless', '--browser', 'chromium']
