@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Button, Modal, FileTypeIcon } from '@deepseek-ai/dsh-client-ui-primitives';
 import styles from '../../../ui/amadeus.css';
 import themeStyles from '../../../ui/dsh-theme.css';
-export const inject = ['slots', 'sidebarRightTabs'];
+export const inject = ['slots', 'sidebarRightTabs', 'sidebarRight'];
 export function fileUrl(action, session, path, extra = {}) {
   return `/amadeus/files/${action}?${new URLSearchParams({ session, path, ...extra })}`;
 }
@@ -153,4 +153,25 @@ export function apply(ctx) {
   ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles; document.head.append(style); return () => style.remove(); });
   ctx.effect(() => ctx.sidebarRightTabs.register({ id, kind: 'files', priority: 'extension', title: () => '项目文件', guide: [{ id: 'workspace', order: 10, title: () => '项目文件', description: () => '浏览、上传与下载学习资料', icon: ({ size, className }) => <FileTypeIcon kind="folder" size={size} className={className} /> }] }));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: id }, Files)));
+
+  ctx.effect(() => {
+    let es;
+    try {
+      es = new EventSource('/amadeus/files/sidebar-events');
+      es.onmessage = event => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.tab && ctx.sidebarRight?.openTab) {
+            ctx.sidebarRight.openTab(data.tab);
+          } else if (data.path && ctx.sidebarRight?.openResource) {
+            const clean = data.path.replace(/^\/+/, '');
+            const encodedPath = clean.split('/').map(encodeURIComponent).join('/');
+            const session = data.session || 'default';
+            ctx.sidebarRight.openResource(`dsh-resource://file/session/${encodeURIComponent(session)}/${encodedPath}`);
+          }
+        } catch {}
+      };
+    } catch {}
+    return () => { es?.close(); };
+  });
 }
