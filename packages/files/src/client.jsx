@@ -4,7 +4,9 @@ import styles from '../../../ui/amadeus.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 export const inject = ['slots', 'sidebarRightTabs', 'sidebarRight'];
 export function fileUrl(action, session, path, extra = {}) {
-  return `/amadeus/files/${action}?${new URLSearchParams({ session, path, ...extra })}`;
+  const query = new URLSearchParams({ session, path, ...extra });
+  const origin = typeof location !== 'undefined' ? location.origin : '';
+  return origin ? new URL(`/amadeus/files/${action}?${query}`, origin).href : `/amadeus/files/${action}?${query}`;
 }
 async function request(url, init) {
   const response = await fetch(url, init);
@@ -157,7 +159,10 @@ export function apply(ctx) {
   ctx.effect(() => {
     let es;
     try {
-      es = new EventSource('/amadeus/files/sidebar-events');
+      const ssePath = '/amadeus/files/sidebar-events';
+      const origin = typeof location !== 'undefined' ? location.origin : '';
+      const sseUrl = origin ? new URL(ssePath, origin).href : ssePath;
+      es = new EventSource(sseUrl);
       es.onmessage = event => {
         try {
           const data = JSON.parse(event.data);

@@ -28,6 +28,10 @@ import brandMark from '../assets/amadeus-brand-mark.png';
 
 export const inject = ['slots', 'documentPreviews', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
 const ASSETS = '/amadeus/reader-assets/';
+function withOrigin(path) {
+  const origin = typeof location !== 'undefined' ? location.origin : '';
+  return origin ? new URL(path, origin).href : path;
+}
 GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
 function AmadeusBrandMark({ size = 24, className }) {
   const mask = `url("${brandMark}") center / contain no-repeat`;
@@ -209,7 +213,7 @@ async function inspectPdfPages(pdf, signal) {
 
 async function loadPdfPreview({ sessionId, path, format, signal, report }) {
   report({ phase: 'prepare' });
-  const response = await fetch(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`, { signal });
+  const response = await fetch(withOrigin(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`), { signal });
   if (!response.ok) throw new Error((await response.json()).error);
   const metadata = await response.json();
   report({ phase: format === 'pdf' ? 'download' : 'convert' });
@@ -382,7 +386,7 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible,
       if (stopped || running || document.visibilityState !== 'visible') return;
       running = true;
       try {
-        const response = await fetch(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`);
+        const response = await fetch(withOrigin(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`));
         if (!response.ok) throw new Error((await response.json()).error);
         const metadata = await response.json();
         if (!stopped && metadata.version !== preview.version) {
@@ -452,7 +456,7 @@ function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible,
   useCtrlWheelZoom(scroll, zoom);
   usePdfPinchZoom(scroll, scale, pinchZoom);
   return <section ref={root} className="amadeus-reader">
-    <div className="amadeus-toolbar"><span className="amadeus-ellipsis" title={path}>{path}</span><a className="amadeus-icon" href={`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="amadeus-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="amadeus-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
+    <div className="amadeus-toolbar"><span className="amadeus-ellipsis" title={path}>{path}</span><a className="amadeus-icon" href={withOrigin(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`)} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="amadeus-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="amadeus-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
     {error && <p className="amadeus-error" role="alert">{error}</p>}
     {!firstReady && !error && <PreviewLoading key={`${resourceAddress}:${attempt}`} {...progress} office={format !== 'pdf'} />}
     <div className="amadeus-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>

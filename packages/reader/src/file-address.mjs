@@ -11,10 +11,15 @@ export function parseEditableAddress(address) {
 
 export function sourceRequestUrl(address, extra = {}) {
   const { sessionId, path } = parseEditableAddress(address);
-  return `/amadeus/files/source?${new URLSearchParams({ session: sessionId, path, ...extra })}`;
+  const query = new URLSearchParams({ session: sessionId, path, ...extra });
+  const origin = typeof location !== 'undefined' ? location.origin : '';
+  return origin ? new URL(`/amadeus/files/source?${query}`, origin).href : `/amadeus/files/source?${query}`;
 }
 
 export function sourceDownloadUrl(address) {
   const { sessionId, path } = parseEditableAddress(address);
-  return `/amadeus/files/download?${new URLSearchParams({ session: sessionId, path })}`;
+  const query = new URLSearchParams({ session: sessionId, path });
+  const origin = typeof location !== 'undefined' ? location.origin : '';
+  return origin ? new URL(`/amadeus/files/download?${query}`, origin).href : `/amadeus/files/download?${query}`;
 }
+
