@@ -752,8 +752,25 @@ export function apply(ctx) {
   const PagedReader = props => <PagedTab {...props} cache={previewCache} />;
   const renderLatexPdf = (pdf, info) => <GeneratedPdfPreview bytes={pdf} {...info} />;
   const openPreviewBeside = ({ address, panelId }) => {
-    const paneId = ctx.sidebarRight.split(panelId) ?? panelId;
-    ctx.sidebarRight.openTab(renderedPreviewKind, { paneId, params: { address } });
+    try {
+      const surface = ctx.sidebarRight.mounted?.();
+      const layout = surface?.layout;
+      const dockPanes = layout ? Object.values(layout.nodes).filter(n => n?.kind === 'pane' && n?.host === 'dock').map(n => n.id) : [];
+      let targetPaneId = dockPanes.find(id => id !== panelId);
+      if (!targetPaneId) {
+        targetPaneId = ctx.sidebarRight.split(panelId);
+      }
+      const finalPaneId = targetPaneId || panelId;
+      setTimeout(() => {
+        try {
+          ctx.sidebarRight.openTab(renderedPreviewKind, { paneId: finalPaneId, params: { address } });
+        } catch (err) {
+          console.error('[Amadeus] Failed to open preview tab:', err);
+        }
+      }, 0);
+    } catch (err) {
+      console.error('[Amadeus] openPreviewBeside error:', err);
+    }
   };
   const Editor = props => <TextEditorTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={renderLatexPdf} onOpenPreviewBeside={openPreviewBeside} />;
   const RenderedPreview = props => <RenderedPreviewTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={renderLatexPdf} />;
