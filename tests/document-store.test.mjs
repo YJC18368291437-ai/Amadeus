@@ -89,7 +89,70 @@ test('releases clean records after their last tab closes', async () => {
   await record.load();
   assert.equal(store.has(address), true);
   release();
+  await Promise.resolve();
   assert.equal(store.has(address), false);
+});
+
+test('split remounts reuse the same document and pending load', async () => {
+  let finish;
+  let calls = 0;
+  const store = createDocumentStore({ request: () => { calls++; return new Promise(resolve => { finish = resolve; }); } });
+  const record = store.open(address);
+  const release = record.retain(), unsubscribe = record.subscribe(() => {});
+  const loading = record.load();
+  unsubscribe(); release();
+  assert.equal(store.open(address), record);
+  const retainPreview = record.retain(), subscribeTitle = record.subscribe(() => {});
+  await Promise.resolve();
+  assert.equal(store.open(address), record);
+  const previewLoading = record.load();
+  finish(response(200, { text: 'saved', version: 'v1', path: 'a.md' }));
+  await Promise.all([loading, previewLoading]);
+  assert.equal(calls, 1);
+  retainPreview();
+  await Promise.resolve();
+  assert.equal(store.has(address), true);
+  subscribeTitle();
+  await Promise.resolve();
+  assert.equal(store.has(address), false);
+});
+
+test('opening many documents never evicts a mounted document', async () => {
+  const store = createDocumentStore();
+  const records = Array.from({ length: 30 }, (_, index) => {
+    const key = `${address}-${index}`;
+    const record = store.open(key);
+    return { key, record, release: record.retain() };
+  });
+  for (const { key, record } of records) assert.equal(store.open(key), record);
+  for (const { release } of records) release();
+  await Promise.resolve();
+  for (const { key } of records) assert.equal(store.has(key), false);
+});
+
+test('an old record cannot evict its replacement after clearing the store', async () => {
+  const store = createDocumentStore();
+  const old = store.open(address), release = old.retain();
+  store.clear();
+  const replacement = store.open(address);
+  release();
+  await Promise.resolve();
+  assert.equal(store.open(address), replacement);
+});
+
+test('subscribers that reattach during a notification are only called once', () => {
+  const record = createDocumentStore().open(address);
+  let calls = 0;
+  let unsubscribe;
+  const listener = () => {
+    calls++;
+    unsubscribe();
+    if (calls < 10) unsubscribe = record.subscribe(listener);
+  };
+  unsubscribe = record.subscribe(listener);
+  record.setPreviewing(true);
+  assert.equal(calls, 1);
+  unsubscribe();
 });
 
 test('discard restores the saved version and clears the dirty marker', async () => {

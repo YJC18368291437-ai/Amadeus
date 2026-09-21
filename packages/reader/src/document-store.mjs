@@ -17,7 +17,7 @@ export function createDocumentStore({ request = fetch } = {}) {
   function open(address) {
     if (records.has(address)) return records.get(address);
     const listeners = new Set();
-    let loadPromise, checkPromise, savePromise, consumers = 0, wasRetained = false;
+    let loadPromise, checkPromise, savePromise, consumers = 0, wasRetained = false, evictionPending = false;
     let snapshot = {
       address,
       status: 'idle',
@@ -31,10 +31,20 @@ export function createDocumentStore({ request = fetch } = {}) {
       error: null,
       conflict: null,
     };
+    const canEvict = () => consumers === 0 && listeners.size === 0 && !snapshot.dirty && !snapshot.saving;
+    const evictWhenUnused = () => {
+      if (!wasRetained || !canEvict() || evictionPending) return;
+      // A split moves React tabs between panes: allow their effects to reattach.
+      evictionPending = true;
+      queueMicrotask(() => {
+        evictionPending = false;
+        if (canEvict() && records.get(address) === record) records.delete(address);
+      });
+    };
     const publish = patch => {
       snapshot = { ...snapshot, ...patch };
-      for (const listener of listeners) listener();
-      if (wasRetained && consumers === 0 && !snapshot.dirty && !snapshot.saving && records.get(address) === record) records.delete(address);
+      for (const listener of [...listeners]) listener();
+      evictWhenUnused();
     };
     const settle = body => {
       publish({ status: 'ready', path: body.path, base: body.text, draft: body.text, version: body.version, dirty: false, saving: false, error: null, conflict: null });
@@ -97,8 +107,8 @@ export function createDocumentStore({ request = fetch } = {}) {
 
     const record = {
       address,
-      retain() { wasRetained = true; consumers++; let active = true; return () => { if (!active) return; active = false; consumers--; if (consumers === 0 && !snapshot.dirty && !snapshot.saving) records.delete(address); }; },
-      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+      retain() { wasRetained = true; consumers++; let active = true; return () => { if (!active) return; active = false; consumers--; evictWhenUnused(); }; },
+      subscribe(listener) { wasRetained = true; listeners.add(listener); return () => { listeners.delete(listener); evictWhenUnused(); }; },
       getSnapshot() { return snapshot; },
       load,
       check,
