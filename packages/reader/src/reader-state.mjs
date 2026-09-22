@@ -14,14 +14,3 @@ export function reconcileAnnotationDraft({ annotations, draft, phase }) {
   if (annotations === 0 && draft === ANNOTATION_DRAFT_MARKER) return '';
   return null;
 }
-
-export function currentPageAt(pages, anchor) {
-  if (!pages.length) return 1;
-  let low = 0, high = pages.length - 1, current = 0;
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    if (pages[middle].top <= anchor) { current = middle; low = middle + 1; }
-    else high = middle - 1;
-  }
-  return pages[current].page;
-}

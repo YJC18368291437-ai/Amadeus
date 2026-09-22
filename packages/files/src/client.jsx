@@ -155,28 +155,4 @@ export function apply(ctx) {
   ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles; document.head.append(style); return () => style.remove(); });
   ctx.effect(() => ctx.sidebarRightTabs.register({ id, kind: 'files', priority: 'extension', title: () => '项目文件', guide: [{ id: 'workspace', order: 10, title: () => '项目文件', description: () => '浏览、上传与下载学习资料', icon: ({ size, className }) => <FileTypeIcon kind="folder" size={size} className={className} /> }] }));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: id }, Files)));
-
-  ctx.effect(() => {
-    let es;
-    try {
-      const ssePath = '/amadeus/files/sidebar-events';
-      const origin = typeof location !== 'undefined' ? location.origin : '';
-      const sseUrl = origin ? new URL(ssePath, origin).href : ssePath;
-      es = new EventSource(sseUrl);
-      es.onmessage = event => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.tab && ctx.sidebarRight?.openTab) {
-            ctx.sidebarRight.openTab(data.tab);
-          } else if (data.path && ctx.sidebarRight?.openResource) {
-            const clean = data.path.replace(/^\/+/, '');
-            const encodedPath = clean.split('/').map(encodeURIComponent).join('/');
-            const session = data.session || 'default';
-            ctx.sidebarRight.openResource(`dsh-resource://file/session/${encodeURIComponent(session)}/${encodedPath}`);
-          }
-        } catch {}
-      };
-    } catch {}
-    return () => { es?.close(); };
-  });
 }

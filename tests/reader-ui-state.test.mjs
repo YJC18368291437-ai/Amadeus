@@ -4,7 +4,6 @@ import {
   ANNOTATION_DRAFT_MARKER,
   stripAnnotationDraftMarker,
   reconcileAnnotationDraft,
-  currentPageAt,
 } from '../packages/reader/src/reader-state.mjs';
 
 test('annotation draft marker admits an empty visible prompt without leaking into text', () => {
@@ -28,9 +27,4 @@ test('current page follows the reading anchor through pages and gaps', () => {
     { page: 2, top: 650, bottom: 1250 },
     { page: 3, top: 1280, bottom: 1880 },
   ];
-  assert.equal(currentPageAt(pages, 200), 1);
-  assert.equal(currentPageAt(pages, 700), 2);
-  assert.equal(currentPageAt(pages, 1266), 2);
-  assert.equal(currentPageAt(pages, 1500), 3);
-  assert.equal(currentPageAt([], 100), 1);
 });

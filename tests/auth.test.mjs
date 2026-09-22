@@ -21,4 +21,6 @@ test('missing credentials fail closed and null/file origins are rejected', () =>
   assert.throws(() => createAuth({ username: '', password: '' }));
   assert.equal(sameOrigin({ headers: { host: 'example.com', origin: 'null' } }), false);
   assert.equal(sameOrigin({ headers: { host: 'example.com', origin: 'https://example.com' } }), true);
+  assert.equal(sameOrigin({ method: 'GET', headers: { host: 'example.com', 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate' } }), true);
+  assert.equal(sameOrigin({ method: 'GET', headers: { host: 'example.com', 'sec-fetch-site': 'cross-site', 'sec-fetch-dest': 'document' } }), true);
 });

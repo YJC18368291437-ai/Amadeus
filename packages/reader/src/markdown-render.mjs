@@ -14,7 +14,7 @@ renderer.use(texmath, {
   delimiters: 'dollars',
   katexOptions: {
     throwOnError: false,
-    strict: 'warn',
+    strict: false,
     trust: false,
     output: 'htmlAndMathml',
   },

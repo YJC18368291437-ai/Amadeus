@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.1.0-alpha.1（预发布）
+
+基于 `@deepseek-ai/dsh@0.1.6-alpha.2` 的兼容重写，删除与 DSH 原生能力重复的代码。
+
+### 移除（由 DSH 原生能力替代）
+
+- 移除 `open_sidebar` 主动工具及配套 SSE 通道：原生侧栏已默认预览文件引用。
+- 移除 terminal 插件：原生侧栏终端支持多标签、刷新恢复与系统用户权限。
+- 移除 ONLYOFFICE 转换链路（`convert.mjs`、`onlyoffice.mjs`、`pdf-http.mjs`、`/amadeus/preview` 路由、预览缓存与分页阅读器）：原生 `dsh-office-to-pdf` 使用 LibreOffice 引擎转换 Office 文件，原生 PDF/Office 预览自带可选择文字层，并支持 Excel。
+- 移除配置项 `onlyOffice*`、`previewWorkers`、`previewTimeoutMs`、`previewCacheVersion`、`maxPreviewBytes`。
+
+### 新增
+
+- 为原生侧栏 PDF/Office 文字层注入固定半透明蓝选中色 `rgba(68,118,254,.45)`，替代几乎不可见的主题悬停色（需 `!important` 以压过后插入的懒加载 PDF 样式）。
+- 注释引用点击跳转在原生 PDF 预览内按 `data-pdf-page` 定位到原页；原生预览内的文字选区自动记录页码。
+- files 插件新增 `PUT /amadeus/files/artifact`：编译产物等自生成文件的无条件覆盖写入（原子临时文件 + 改名，受 `maxUploadBytes` 限制）。
+- LaTeX「编译为 PDF」：编译结果写入工作区同名 `.pdf`，并作为普通文件交给原生侧栏预览（文字层 + 蓝色选中），与手动上传的 PDF 走同一条渲染路线。
+
+### 移除（LaTeX 自带查看器）
+
+- 删除 `GeneratedPdfPreview` 及其缩放、页码跳转、双指缩放控件，连带 `latex-preview.jsx`、`page-control.*`、`scroll-page.mjs`、`loading.*`、`usePdfPinchZoom`、`currentPageAt`。
+- 移除 `pdfjs-dist` 依赖与 reader 资产中的 pdf.worker/cmaps/standard_fonts/wasm 拷贝；reader 资产只保留 SwiftLaTeX 与 KaTeX。
+
+### 兼容适配（0.1.6-alpha.2 破坏性变更）
+
+- 会话多实例：`sessions.list` 快照不再含 `current`，改为从 Amadeus 渲染的会话级表面捕获活跃会话。
+- `sidebarRight.mounted()` 已移除，「编译并在右侧打开预览」改为记忆分栏并在失败时重新分栏。
+- 首页标题 `El Psy Kongroo` 改为文本节点替换（locale 词典由命名空间所有者独占注册，`main.conversation` 不再透传 `t`）。
+- 编辑器接管逻辑保留：原生 `text` 标签页中可编辑文档仍由 CodeMirror 编辑器渲染，PDF/Office 完全交回原生预览。
+
+### 版本
+
+- 工作区与 Reader 1.1.0-alpha.1；Files 1.0.3；login 保持 1.0.1。
+
 ## 1.0.3 - 2026-09-21
 
 - 修复 Markdown「编译并在右侧打开预览」触发的文档状态反复创建、加载和渲染，以及由此导致的浏览器卡死和内存持续增长。

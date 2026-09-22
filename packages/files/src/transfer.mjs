@@ -47,6 +47,25 @@ export async function upload(root, input, stream, { maxBytes = 1024 ** 3, overwr
     return { path: path.relative(root, target).replaceAll('\\', '/'), bytes };
   } finally { await unlink(temp).catch(() => {}); }
 }
+export async function writeArtifact(root, input, stream, { maxBytes = 1024 ** 3 } = {}) {
+  const target = await resolveWithin(root, input, { createParents: true, allowMissing: true });
+  if (target === root) throw new HttpError(400, 'A filename is required');
+  const temp = path.join(path.dirname(target), `.amadeus-upload-${randomUUID()}`);
+  let bytes = 0;
+  try {
+    await pipeline(stream, new Transform({ transform(chunk, encoding, done) {
+      bytes += chunk.length;
+      done(bytes > maxBytes ? new HttpError(413, 'Artifact exceeds the configured file size limit') : null, chunk);
+    } }), createWriteStream(temp, { flags: 'wx', mode: 0o600 }));
+    await exclusive(target, async () => {
+      await resolveWithin(root, input, { allowMissing: true });
+      const info = await lstat(target).catch(error => { if (error.code !== 'ENOENT') throw error; });
+      if (info?.isSymbolicLink() || info?.isDirectory()) throw new HttpError(409, 'Target is not a regular file');
+      await rename(temp, target);
+    });
+    return { path: path.relative(root, target).replaceAll('\\', '/'), bytes };
+  } finally { await unlink(temp).catch(() => {}); }
+}
 export async function zipDirectory(root, target, { maxEntries = 100000 } = {}) {
   const entries = [];
   async function scan(folder, relative) {

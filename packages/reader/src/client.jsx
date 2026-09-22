@@ -1,38 +1,22 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
-import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist';
 import { createAnnotationStore, findAnnotationReferences, locateConversationQuote, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
 import styles from '../../../ui/amadeus.css';
 import themeStyles from '../../../ui/dsh-theme.css';
-import { PreviewLoading } from './loading.jsx';
-import loadingStyles from './loading.css';
-import { PageControl } from './page-control.jsx';
-import pageControlStyles from './page-control.css';
-import { scrollToPage } from './scroll-page.mjs';
-import { createPreviewCache } from './preview-cache.mjs';
-import { currentPageAt, reconcileAnnotationDraft, stripAnnotationDraftMarker } from './reader-state.mjs';
+import { reconcileAnnotationDraft, stripAnnotationDraftMarker } from './reader-state.mjs';
 import { createDocumentStore } from './document-store.mjs';
 import { parseEditableAddress } from './file-address.mjs';
 import { editorKind } from './editor-routing.mjs';
 import { TextEditorTab } from './text-editor-tab.jsx';
-import { DownloadIcon } from './document-toolbar.jsx';
 import { createTexCompiler } from './tex-engine.mjs';
 import editorStyles from './editor.css';
 import previewStyles from './preview.css';
 import { amadeusKatexCss } from './markdown-preview.jsx';
 import { RenderedPreviewTab } from './rendered-preview-tab.jsx';
-import { useCtrlWheelZoom } from './wheel-zoom.jsx';
-import { clampZoom, pinchZoomScale } from './zoom.mjs';
 import brandMark from '../assets/amadeus-brand-mark.png';
 
-export const inject = ['slots', 'documentPreviews', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'sessions', 'uiConversation'];
-const ASSETS = '/amadeus/reader-assets/';
-function withOrigin(path) {
-  const origin = typeof location !== 'undefined' ? location.origin : '';
-  return origin ? new URL(path, origin).href : path;
-}
-GlobalWorkerOptions.workerSrc = ASSETS + 'pdf.worker.min.mjs';
+export const inject = ['slots', 'sidebarRight', 'sidebarRightTabs', 'conversation'];
 function AmadeusBrandMark({ size = 24, className }) {
   const mask = `url("${brandMark}") center / contain no-repeat`;
   return <span className={className} aria-hidden="true" style={{ display: 'block', width: size, height: size, flex: 'none', color: 'inherit', backgroundColor: 'currentColor', WebkitMask: mask, mask }} />;
@@ -59,23 +43,22 @@ function replaceBrandSlot(ctx, name, Replacement) {
   const unsubscribe = ctx.slots.subscribe(name, install);
   return () => { unsubscribe(); if (entry?.component === Replacement) entry.component = Native; };
 }
-function replaceConversationHeadline(ctx) {
-  let entry, Native, Branded;
-  const install = () => {
-    if (entry) return;
-    const candidate = ctx.slots.entries('main.conversation')[0];
-    if (!candidate) return;
-    entry = candidate; Native = candidate.component;
-    Branded = props => {
-      const translate = props.t;
-      const t = (key, params) => key === 'hero.headline' ? 'El Psy Kongroo' : translate(key, params);
-      return <Native {...props} t={t} />;
-    };
-    candidate.component = Branded;
+function replaceConversationHeadline() {
+  // alpha.2 renders the hero headline through the conversation.content factory's
+  // locale dictionary; factory views are version-cached, so swap the visible
+  // text node instead of chasing the locale plumbing.
+  const NATIVE = ['探索未至之境', 'Into the Unknown'];
+  const swap = () => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (NATIVE.includes(node.data.trim()) && node.data.trim() === node.data) node.data = 'El Psy Kongroo';
+    }
   };
-  install();
-  const unsubscribe = ctx.slots.subscribe('main.conversation', install);
-  return () => { unsubscribe(); if (entry?.component === Branded) entry.component = Native; };
+  swap();
+  const observer = new MutationObserver(swap);
+  observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+  return () => observer.disconnect();
 }
 function delayQueueDock(ctx) {
   let entry, Native, Delayed;
@@ -120,352 +103,6 @@ function suppressDesktopUnavailable(ctx) {
 }
 function sourcePath(address) {
   return parseEditableAddress(address).path;
-}
-function usePdfPinchZoom(elementRef, scale, onScale) {
-  const latest = useRef({ scale, onScale });
-  latest.current = { scale, onScale };
-  useEffect(() => {
-    const element = elementRef.current;
-    if (!element) return;
-    let pinch;
-    const distance = touches => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
-    const start = event => {
-      if (event.touches.length !== 2) return;
-      const rect = element.getBoundingClientRect();
-      const x = (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left;
-      const y = (event.touches[0].clientY + event.touches[1].clientY) / 2 - rect.top;
-      pinch = { distance: distance(event.touches), scale: latest.current.scale, x, y, left: element.scrollLeft, top: element.scrollTop };
-      event.preventDefault();
-    };
-    const move = event => {
-      if (!pinch || event.touches.length !== 2) return;
-      event.preventDefault();
-      const next = pinchZoomScale(pinch.scale, pinch.distance, distance(event.touches));
-      latest.current.onScale(next);
-      requestAnimationFrame(() => {
-        const ratio = next / pinch.scale;
-        element.scrollLeft = (pinch.left + pinch.x) * ratio - pinch.x;
-        element.scrollTop = (pinch.top + pinch.y) * ratio - pinch.y;
-      });
-    };
-    const end = event => { if (event.touches.length < 2) pinch = undefined; };
-    element.addEventListener('touchstart', start, { passive: false });
-    element.addEventListener('touchmove', move, { passive: false });
-    element.addEventListener('touchend', end);
-    element.addEventListener('touchcancel', end);
-    return () => {
-      element.removeEventListener('touchstart', start);
-      element.removeEventListener('touchmove', move);
-      element.removeEventListener('touchend', end);
-      element.removeEventListener('touchcancel', end);
-    };
-  }, [elementRef]);
-}
-function PdfPage({ pdf, number, scale, baseSize, path, format, sessionId, onRendered }) {
-  const holder = useRef(), canvas = useRef(), text = useRef();
-  const [near, setNear] = useState(false), [error, setError] = useState('');
-  const size = { width: baseSize.width * scale, height: baseSize.height * scale };
-  useEffect(() => {
-    const observer = new IntersectionObserver(entries => setNear(entries[0].isIntersecting), { rootMargin: '900px' });
-    observer.observe(holder.current); return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
-    if (!near) return;
-    let cancelled = false, renderTask, layer;
-    (async () => {
-      const page = await pdf.getPage(number);
-      if (cancelled) return;
-      const viewport = page.getViewport({ scale });
-      const ratio = Math.min(devicePixelRatio || 1, 2);
-      const target = canvas.current;
-      target.width = Math.floor(viewport.width * ratio); target.height = Math.floor(viewport.height * ratio);
-      target.style.width = viewport.width + 'px'; target.style.height = viewport.height + 'px';
-      renderTask = page.render({ canvasContext: target.getContext('2d'), viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
-      await renderTask.promise;
-      if (cancelled) return;
-      text.current.replaceChildren();
-      layer = new TextLayer({ textContentSource: await page.getTextContent(), container: text.current, viewport });
-      await layer.render();
-      if (!cancelled) onRendered?.(number);
-    })().catch(error => { if (!cancelled && error.name !== 'RenderingCancelledException') { setError(error.message); onRendered?.(number, error); } });
-    return () => { cancelled = true; renderTask?.cancel(); layer?.cancel(); };
-  }, [pdf, number, scale, near, onRendered]);
-  return <><div ref={holder} className="amadeus-pdf-page" style={{ ...size, '--scale-factor': scale, '--total-scale-factor': scale }} data-amadeus-path={path} data-amadeus-format={format} data-amadeus-page={number} data-amadeus-page-count={pdf.numPages} data-amadeus-session={sessionId}>
-    <canvas ref={canvas} /><div ref={text} className="textLayer" />{error && <p className="amadeus-error">{error}</p>}
-  </div><div className="amadeus-page-label" style={{ width: size.width }}>第 {number} 页</div></>;
-}
-
-async function inspectPdfPages(pdf, signal) {
-  const pageSizes = new Array(pdf.numPages);
-  let cursor = 0;
-  async function inspect() {
-    while (!signal?.aborted) {
-      const index = cursor++;
-      if (index >= pdf.numPages) return;
-      const page = await pdf.getPage(index + 1);
-      const viewport = page.getViewport({ scale: 1 });
-      pageSizes[index] = { width: viewport.width, height: viewport.height };
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(4, pdf.numPages) }, inspect));
-  return pageSizes;
-}
-
-async function loadPdfPreview({ sessionId, path, format, signal, report }) {
-  report({ phase: 'prepare' });
-  const response = await fetch(withOrigin(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`), { signal });
-  if (!response.ok) throw new Error((await response.json()).error);
-  const metadata = await response.json();
-  report({ phase: format === 'pdf' ? 'download' : 'convert' });
-  let pollTimer, polling = format !== 'pdf', loading, parsingFinished = false, completed = false;
-  const stopPolling = () => { polling = false; clearTimeout(pollTimer); };
-  if (polling) {
-    const poll = async () => {
-      try {
-        const progressResponse = await fetch(metadata.progressUrl, { signal });
-        if (!progressResponse.ok) { stopPolling(); return; }
-        const current = await progressResponse.json();
-        if (!polling || signal.aborted) return;
-        if (current.state === 'converting') report({ phase: 'convert', value: current.value, maximum: current.maximum });
-        if (current.state === 'ready' || current.state === 'error') stopPolling();
-      } catch { if (signal.aborted) stopPolling(); }
-      finally { if (polling && !signal.aborted) pollTimer = setTimeout(poll, 150); }
-    };
-    void poll();
-  }
-  try {
-    loading = getDocument({ url: metadata.url, withCredentials: true, disableStream: true, disableAutoFetch: true, rangeChunkSize: 64 * 1024, cMapUrl: ASSETS + 'cmaps/', cMapPacked: true, standardFontDataUrl: ASSETS + 'standard_fonts/', wasmUrl: ASSETS + 'wasm/', isEvalSupported: false });
-    const abort = () => { void loading.destroy(); };
-    signal.addEventListener('abort', abort, { once: true });
-    loading.onProgress = ({ loaded, total }) => {
-      if (!parsingFinished && loaded) { stopPolling(); report({ phase: 'download', loaded, total }); }
-    };
-    const pdf = await loading.promise;
-    stopPolling();
-    parsingFinished = true;
-    report({ phase: 'render' });
-    const pageSizes = await inspectPdfPages(pdf, signal);
-    if (signal.aborted) throw new DOMException('Preview load was cancelled', 'AbortError');
-    signal.removeEventListener('abort', abort);
-    completed = true;
-    return { pdf, pageSizes, version: metadata.version, dispose: () => loading.destroy() };
-  } finally {
-    stopPolling();
-    if (!completed) await loading?.destroy().catch(() => {});
-  }
-}
-
-function GeneratedPdfPreview({ bytes, path, sessionId, onControlsChange, focusPage, focusRevision }) {
-  const scroll = useRef();
-  const pageGeometry = useRef([]), scrollFrame = useRef(), manualScale = useRef(false);
-  const [preview, setPreview] = useState(), [scale, setScale] = useState(1), [page, setPage] = useState(1), [error, setError] = useState('');
-  const zoom = useCallback(delta => {
-    manualScale.current = true;
-    setScale(current => clampZoom(current + delta, .25, 3));
-  }, []);
-  const pinchZoom = useCallback(next => { manualScale.current = true; setScale(next); }, []);
-  const go = useCallback(value => {
-    if (!preview) return;
-    const next = Math.max(1, Math.min(preview.pdf.numPages, Number(value) || 1));
-    setPage(next); scrollToPage(scroll.current, next);
-  }, [preview]);
-  useCtrlWheelZoom(scroll, zoom);
-  usePdfPinchZoom(scroll, scale, pinchZoom);
-  useEffect(() => {
-    manualScale.current = false;
-    const controller = new AbortController();
-    const loading = getDocument({ data: bytes.slice(), cMapUrl: ASSETS + 'cmaps/', cMapPacked: true, standardFontDataUrl: ASSETS + 'standard_fonts/', wasmUrl: ASSETS + 'wasm/', isEvalSupported: false });
-    loading.promise.then(async pdf => {
-      const pageSizes = await inspectPdfPages(pdf, controller.signal);
-      if (controller.signal.aborted) return;
-      const fitted = Math.min(1.4, Math.max(.25, ((scroll.current?.clientWidth || 640) - 32) / pageSizes[0].width));
-      setScale(fitted); setPreview({ pdf, pageSizes });
-    }).catch(loadError => { if (!controller.signal.aborted) setError(loadError.message); });
-    return () => { controller.abort(); void loading.destroy(); };
-  }, [bytes]);
-  useEffect(() => {
-    if (!preview || !scroll.current) return;
-    const observer = new ResizeObserver(entries => {
-      if (manualScale.current) return;
-      const width = entries[0].contentRect.width;
-      setScale(Math.min(1.4, Math.max(.25, (width - 32) / preview.pageSizes[0].width)));
-    });
-    observer.observe(scroll.current);
-    return () => observer.disconnect();
-  }, [preview]);
-  useLayoutEffect(() => {
-    const container = scroll.current;
-    if (!preview || !container) { pageGeometry.current = []; return; }
-    const viewport = container.getBoundingClientRect();
-    pageGeometry.current = [...container.querySelectorAll('[data-amadeus-page]')].map(element => {
-      const rect = element.getBoundingClientRect();
-      const top = container.scrollTop + rect.top - viewport.top;
-      return { page: Number(element.dataset.amadeusPage), top, bottom: top + rect.height };
-    });
-  }, [preview, scale]);
-  useEffect(() => {
-    if (!onControlsChange) return;
-    onControlsChange(preview ? { page, total: preview.pdf.numPages, go, zoom } : null);
-    return () => onControlsChange(null);
-  }, [go, onControlsChange, page, preview, zoom]);
-  useEffect(() => {
-    if (!preview || !focusPage) return;
-    const frame = requestAnimationFrame(() => go(focusPage));
-    return () => cancelAnimationFrame(frame);
-  }, [focusPage, focusRevision, go, preview]);
-  useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
-  function onScroll() {
-    cancelAnimationFrame(scrollFrame.current);
-    scrollFrame.current = requestAnimationFrame(() => {
-      const container = scroll.current;
-      if (!container) return;
-      const anchor = container.scrollTop + Math.min(container.clientHeight * .35, 240);
-      const next = currentPageAt(pageGeometry.current, anchor);
-      setPage(previous => previous === next ? previous : next);
-    });
-  }
-  if (error) return <p className="amadeus-error" role="alert">{error}</p>;
-  return <div className="amadeus-pdf-scroll amadeus-generated-pdf" ref={scroll} onScroll={onScroll}>{preview ? preview.pageSizes.map((baseSize, index) => <PdfPage key={index} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format="tex" sessionId={sessionId} />) : <PreviewLoading phase="render" />}</div>;
-}
-
-function PdfPreview({ resourceAddress, sessionId, scrollportRef, cache, visible, focusPage, focusRevision }) {
-  const parsed = parseEditableAddress(resourceAddress), path = parsed.path, format = path.split('.').pop().toLowerCase();
-  sessionId = parsed.sessionId;
-  const cacheKey = `${sessionId}\n${resourceAddress}`;
-  const [preview, setPreview] = useState(), [error, setError] = useState(''), [scale, setScale] = useState(1), [page, setPage] = useState(1);
-  const scroll = useRef(), root = useRef(), entryRef = useRef(), pendingScroll = useRef(), scrollFrame = useRef(), pageGeometry = useRef([]);
-  const [attempt, setAttempt] = useState(0), [progress, setProgress] = useState({ phase: 'prepare' }), [firstReady, setFirstReady] = useState(false);
-  const onRendered = useCallback((_number, failure) => {
-    if (failure) setError(failure.message); else setFirstReady(true);
-  }, []);
-  useLayoutEffect(() => {
-    const host = root.current?.parentElement;
-    const pane = host?.parentElement;
-    if (!host || !pane) return;
-    host.setAttribute('data-amadeus-reader-host', '');
-    pane.setAttribute('data-amadeus-reader-pane', '');
-    return () => {
-      host.removeAttribute('data-amadeus-reader-host');
-      pane.removeAttribute('data-amadeus-reader-pane');
-    };
-  }, []);
-  useEffect(() => {
-    let closed = false;
-    setPreview(undefined); setError(''); setProgress({ phase: 'prepare' }); setFirstReady(false);
-    const handle = cache.open(cacheKey, ({ signal, report }) => loadPdfPreview({ sessionId, path, format, signal, report }));
-    const { entry } = handle;
-    entryRef.current = entry;
-    const sync = () => {
-      const snapshot = entry.getSnapshot();
-      setProgress(snapshot.progress);
-      if (snapshot.status === 'error') setError(snapshot.error?.message || '预览加载失败');
-    };
-    sync();
-    const unsubscribe = entry.subscribe(sync);
-    entry.promise.then(value => {
-      if (closed) return;
-      const view = entry.getView();
-      const fitted = Math.min(1.4, Math.max(0.25, ((scroll.current?.clientWidth || 640) - 32) / value.pageSizes[0].width));
-      const nextScale = view.scale ?? fitted;
-      const nextPage = Math.max(1, Math.min(value.pdf.numPages, view.page ?? 1));
-      entry.setView({ scale: nextScale, page: nextPage });
-      setScale(nextScale); setPage(nextPage); setPreview(value);
-      pendingScroll.current = view.scrollTop ?? 0;
-    }).catch(loadError => { if (!closed && loadError.name !== 'AbortError') setError(loadError.message); });
-    return () => {
-      closed = true;
-      if (entryRef.current === entry) entryRef.current = undefined;
-      if (scroll.current) entry.setView({ scrollTop: scroll.current.scrollTop });
-      unsubscribe(); handle.release();
-    };
-  }, [cache, cacheKey, attempt]);
-  useEffect(() => {
-    if (!visible || !preview?.version) return;
-    let stopped = false, running = false;
-    const check = async () => {
-      if (stopped || running || document.visibilityState !== 'visible') return;
-      running = true;
-      try {
-        const response = await fetch(withOrigin(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, metadata: '1' })}`));
-        if (!response.ok) throw new Error((await response.json()).error);
-        const metadata = await response.json();
-        if (!stopped && metadata.version !== preview.version) {
-          stopped = true;
-          await cache.invalidate(cacheKey);
-          setAttempt(value => value + 1);
-        }
-      } catch (pollError) { if (!stopped) setError(pollError.message); }
-      finally { running = false; }
-    };
-    void check();
-    const timer = setInterval(check, 2000);
-    document.addEventListener('visibilitychange', check);
-    return () => { stopped = true; clearInterval(timer); document.removeEventListener('visibilitychange', check); };
-  }, [cache, cacheKey, path, preview?.version, sessionId, visible]);
-  useLayoutEffect(() => {
-    if (!preview || pendingScroll.current === undefined || !scroll.current) return;
-    scroll.current.scrollTop = pendingScroll.current;
-    pendingScroll.current = undefined;
-  }, [preview]);
-  useLayoutEffect(() => {
-    const container = scroll.current;
-    if (!preview || !container) { pageGeometry.current = []; return; }
-    const viewport = container.getBoundingClientRect();
-    pageGeometry.current = [...container.querySelectorAll('[data-amadeus-page]')].map(element => {
-      const rect = element.getBoundingClientRect();
-      const top = container.scrollTop + rect.top - viewport.top;
-      return { page: Number(element.dataset.amadeusPage), top, bottom: top + rect.height };
-    });
-    updateCurrentPage();
-  }, [preview, scale]);
-  useEffect(() => {
-    if (!preview || !focusPage) return;
-    const frame = requestAnimationFrame(() => go(focusPage));
-    return () => cancelAnimationFrame(frame);
-  }, [focusPage, focusRevision, preview]);
-  useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
-  function updateCurrentPage() {
-    const container = scroll.current;
-    if (!container) return;
-    const anchor = container.scrollTop + Math.min(container.clientHeight * .35, 240);
-    const next = currentPageAt(pageGeometry.current, anchor);
-    setPage(previous => previous === next ? previous : next);
-    entryRef.current?.setView({ page: next, scale, scrollTop: container.scrollTop });
-  }
-  function onScroll() {
-    cancelAnimationFrame(scrollFrame.current);
-    scrollFrame.current = requestAnimationFrame(updateCurrentPage);
-  }
-  function go(value) {
-    if (!preview) return;
-    const next = Math.max(1, Math.min(preview.pdf.numPages, Number(value) || 1));
-    setPage(next); scrollToPage(scroll.current, next);
-    entryRef.current?.setView({ page: next, scale, scrollTop: scroll.current?.scrollTop ?? 0 });
-  }
-  function zoom(delta) {
-    setScale(current => {
-      const next = clampZoom(current + delta, .25, 3);
-      entryRef.current?.setView({ scale: next, page, scrollTop: scroll.current?.scrollTop ?? 0 });
-      return next;
-    });
-  }
-  const pinchZoom = useCallback(next => {
-    setScale(next);
-    entryRef.current?.setView({ scale: next, page, scrollTop: scroll.current?.scrollTop ?? 0 });
-  }, [page]);
-  useCtrlWheelZoom(scroll, zoom);
-  usePdfPinchZoom(scroll, scale, pinchZoom);
-  return <section ref={root} className="amadeus-reader">
-    <div className="amadeus-toolbar"><span className="amadeus-ellipsis" title={path}>{path}</span><a className="amadeus-icon" href={withOrigin(`/amadeus/preview?${new URLSearchParams({ session: sessionId, path, download: '1' })}`)} aria-label="下载 PDF" title="下载 PDF" download><DownloadIcon /></a>{preview && <><PageControl page={page} total={preview.pdf.numPages} onChange={go} /><button className="amadeus-icon" aria-label="缩小" title="缩小" onClick={() => zoom(-.1)}>−</button><button className="amadeus-icon" aria-label="放大" title="放大" onClick={() => zoom(.1)}>＋</button></>}</div>
-    {error && <p className="amadeus-error" role="alert">{error}</p>}
-    {!firstReady && !error && <PreviewLoading key={`${resourceAddress}:${attempt}`} {...progress} office={format !== 'pdf'} />}
-    <div className="amadeus-pdf-scroll" onScroll={onScroll} ref={element => { scroll.current = element; scrollportRef?.(element); }}>{preview && preview.pageSizes.map((baseSize, index) => <PdfPage key={`${resourceAddress}:${index}`} pdf={preview.pdf} number={index + 1} scale={scale} baseSize={baseSize} path={path} format={format} sessionId={sessionId} onRendered={onRendered} />)}</div>
-  </section>;
-}
-function PagedTab({ useTabInfo, sessionId, cache }) {
-  const { tab } = useTabInfo();
-  const focus = tab.navigation.params?.amadeusAnnotation;
-  return <PdfPreview resourceAddress={tab.contentId} sessionId={sessionId} cache={cache} visible={tab.visible} focusPage={focus?.page} focusRevision={tab.navigation.revision} />;
 }
 const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
 function AnnotationChip({ annotations }) {
@@ -678,7 +315,7 @@ function SelectionPopup({ selection, onSave, onClose }) {
     {!editing ? <button className="amadeus-selection-trigger" onMouseDown={e => e.preventDefault()} onClick={() => setEditing(true)}><span aria-hidden="true">＋</span> 添加到对话</button> : <><input autoFocus type="text" aria-label="针对选中文本的问题" placeholder="添加可选评论…" value={annotation} onChange={e => setAnnotation(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); save(); } }} /><button type="button" className="amadeus-selection-confirm" aria-label="添加注释" title="添加注释" onClick={save}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4.5 10 3.5 4 7.5-9" /></svg></button>{error && <p role="alert">{error}</p>}</>}
   </div>;
 }
-function installSelection(ctx, store) {
+function installSelection(ctx, store, activeSession) {
   const host = document.createElement('div'); document.body.append(host);
   const root = createRoot(host);
   let locked = false, skipMouseUp = false;
@@ -713,11 +350,21 @@ function installSelection(ctx, store) {
         source.pageStart = Math.min(Number(file.dataset.amadeusPage), Number(end.dataset.amadeusPage));
         source.pageEnd = Math.max(Number(file.dataset.amadeusPage), Number(end.dataset.amadeusPage));
         source.pageCount = Number(file.dataset.amadeusPageCount);
+      } else {
+        // Native sidebar PDF/Office preview: pages carry data-pdf-page.
+        const pageOf = node => { const page = node?.closest?.('[data-pdf-page]'); return page ? Number(page.dataset.pdfPage) : undefined; };
+        const startPage = pageOf(element), endPage = pageOf(endElement);
+        if (startPage !== undefined && endPage !== undefined) {
+          source.pageStart = Math.min(startPage, endPage);
+          source.pageEnd = Math.max(startPage, endPage);
+          source.pageCount = file.querySelectorAll('[data-pdf-page]').length;
+        }
       }
     } else {
       const message = element?.closest('[data-chat-anchor-key]');
       if (!message || !message.contains(endElement)) return close();
-      sessionId = ctx.sessions.list.getSnapshot().current;
+      sessionId = activeSession.id;
+      if (!sessionId) return close();
       const prefix = range.cloneRange(); prefix.selectNodeContents(message); prefix.setEnd(range.startContainer, range.startOffset);
       const offset = prefix.toString().length;
       const messageText = message.textContent || '';
@@ -745,35 +392,51 @@ function UnsavedClosePrompt({ request, onCancel, onClose }) {
 }
 export function apply(ctx) {
   const store = createAnnotationStore(sessionStorage);
-  const previewCache = createPreviewCache({ maxEntries: 6 });
   const documentStore = createDocumentStore();
   const texCompiler = createTexCompiler();
   const renderedPreviewId = 'dsh-amadeus-rendered-preview', renderedPreviewKind = 'amadeus-rendered-preview';
-  const PagedReader = props => <PagedTab {...props} cache={previewCache} />;
-  const renderLatexPdf = (pdf, info) => <GeneratedPdfPreview bytes={pdf} {...info} />;
+  // 0.1.6-alpha.2 removed the single "current" session; capture the session the
+  // user is working in from the session-scoped surfaces this plugin renders.
+  const activeSession = { id: undefined };
+  const trackSession = Component => props => {
+    if (props.sessionId) activeSession.id = props.sessionId;
+    return <Component {...props} />;
+  };
+  const previewPanes = new Map();
+  const paneBeside = panelId => {
+    let targetPaneId = previewPanes.get(panelId);
+    if (!targetPaneId) targetPaneId = ctx.sidebarRight.split(panelId);
+    if (!targetPaneId) targetPaneId = panelId;
+    previewPanes.set(panelId, targetPaneId);
+    return targetPaneId;
+  };
   const openPreviewBeside = ({ address, panelId }) => {
     try {
-      const surface = ctx.sidebarRight.mounted?.();
-      const layout = surface?.layout;
-      const dockPanes = layout ? Object.values(layout.nodes).filter(n => n?.kind === 'pane' && n?.host === 'dock').map(n => n.id) : [];
-      let targetPaneId = dockPanes.find(id => id !== panelId);
-      if (!targetPaneId) {
-        targetPaneId = ctx.sidebarRight.split(panelId);
-      }
-      const finalPaneId = targetPaneId || panelId;
+      paneBeside(panelId);
       setTimeout(() => {
         try {
-          ctx.sidebarRight.openTab(renderedPreviewKind, { paneId: finalPaneId, params: { address } });
-        } catch (err) {
-          console.error('[Amadeus] Failed to open preview tab:', err);
+          ctx.sidebarRight.openTab(renderedPreviewKind, { paneId: previewPanes.get(panelId), params: { address } });
+        } catch {
+          // The remembered pane may have been closed by the user; split again.
+          const paneId = ctx.sidebarRight.split(panelId) || panelId;
+          previewPanes.set(panelId, paneId);
+          ctx.sidebarRight.openTab(renderedPreviewKind, { paneId, params: { address } });
         }
       }, 0);
     } catch (err) {
       console.error('[Amadeus] openPreviewBeside error:', err);
     }
   };
-  const Editor = props => <TextEditorTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={renderLatexPdf} onOpenPreviewBeside={openPreviewBeside} />;
-  const RenderedPreview = props => <RenderedPreviewTab {...props} documentStore={documentStore} texCompiler={texCompiler} renderLatexPdf={renderLatexPdf} />;
+  // LaTeX compile results are workspace artifacts now: write <stem>.pdf and let
+  // the native sidebar preview render it like any other PDF.
+  const onLatexCompiled = async ({ pdf, path, sessionId, panelId, beside }) => {
+    const pdfPath = path.replace(/\.tex$/i, '.pdf');
+    const response = await fetch(`/amadeus/files/artifact?${new URLSearchParams({ session: sessionId, path: pdfPath })}`, { method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: pdf });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || '保存编译产物失败');
+    ctx.sidebarRight.openResource(sessionFileAddress(sessionId, pdfPath), { paneId: beside ? paneBeside(panelId) : panelId });
+  };
+  const Editor = trackSession(props => <TextEditorTab {...props} documentStore={documentStore} texCompiler={texCompiler} onLatexCompiled={onLatexCompiled} onOpenPreviewBeside={openPreviewBeside} />);
+  const RenderedPreview = trackSession(props => <RenderedPreviewTab {...props} documentStore={documentStore} />);
   const PreviewTitleContent = ({ address }) => {
     const record = documentStore.open(address), snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
     return <span className="amadeus-dirty-title">{snapshot.dirty && <DirtyDot />}<span>{sourcePath(address).split('/').pop()} · 预览</span></span>;
@@ -784,7 +447,7 @@ export function apply(ctx) {
     const source = annotation.source;
     if (source?.kind === 'conversation') { focusConversationSource(source, annotation.text); return; }
     if (source?.kind !== 'file') return;
-    const sessionId = ctx.sessions.list.getSnapshot().current;
+    const sessionId = activeSession.id;
     if (!sessionId) return;
     ctx.sidebarRight.openResource(sessionFileAddress(sessionId, source.path), { params: { amadeusAnnotation: { page: source.pageStart, text: annotation.text } } });
   };
@@ -803,6 +466,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.sidebarRight.registerCloseHandler('text', (sessionId, tab) => {
     const key = closeKey(sessionId, tab.id);
     if (closeBypass.delete(key) || !editable(tab.contentId)) return;
+    if (!documentStore.has(tab.contentId)) return;
     const record = documentStore.open(tab.contentId);
     if (!record.getSnapshot().dirty) return;
     const request = { sessionId, tab, record, path: sourcePath(tab.contentId) };
@@ -814,20 +478,15 @@ export function apply(ctx) {
   ctx.effect(() => ctx.slots.inject('sidebar.brand.mark', () => replaceBrandSlot(ctx, 'sidebar.brand.mark', AmadeusBrandMark)));
   ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
   ctx.effect(() => ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark' }, AmadeusBrandMark)));
-  ctx.effect(() => ctx.slots.inject('main.conversation', () => replaceConversationHeadline(ctx)));
+  ctx.effect(() => replaceConversationHeadline());
   ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => delayQueueDock(ctx)));
   ctx.effect(() => ctx.slots.inject('conversation.chat.turnTail', () => suppressDesktopUnavailable(ctx)));
-  ctx.effect(() => () => { void previewCache.clear(); texCompiler.close(); documentStore.clear(); });
-  // Claim resources before the native document owner reads bytes-complete.
-  // The native viewer remains in charge of ordinary text and code documents.
-  const pagedId = 'dsh-amadeus-paged-reader';
+  ctx.effect(() => () => { texCompiler.close(); documentStore.clear(); });
   ctx.effect(() => ctx.sidebarRightTabs.register({ id: renderedPreviewId, kind: renderedPreviewKind, priority: 'extension', title: () => '预览' }));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: renderedPreviewId }, RenderedPreview)));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({ name: 'sidebar.right.pane.tab.title', key: renderedPreviewId }, PreviewTitle)));
-  ctx.effect(() => ctx.sidebarRightTabs.register({ id: pagedId, kind: 'amadeus-paged', priority: 'extension', patterns: ['*.pdf', '*.doc', '*.docx', '*.ppt', '*.pptx'], canOpen: address => { try { return new URL(address).host === 'file' && !!sourcePath(address); } catch { return false; } }, title: address => sourcePath(address).split('/').pop() }));
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: pagedId }, PagedReader)));
-  // Persisted layouts from 0.1.0 still contain native `text` tabs for PDFs and
-  // Office files. Intercept these bodies before their full-file reader mounts.
+  // Take over editable documents from the native viewer; PDFs and Office files
+  // stay with the native sidebar preview (LibreOffice conversion + text layer).
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => {
     let installed = false, dispose;
     const install = () => {
@@ -838,9 +497,7 @@ export function apply(ctx) {
       const Native = entry.component;
       const Compatible = props => {
         const { tab } = props.useTabInfo();
-        let path;
-        try { path = sourcePath(tab.contentId); } catch { return <Native {...props} />; }
-        return /\.(pdf|docx?|pptx?)$/i.test(path) ? <PagedReader {...props} /> : editable(tab.contentId) ? <Editor {...props} /> : <Native {...props} />;
+        return editable(tab.contentId) ? <Editor {...props} /> : <Native {...props} />;
       };
       // Keep this native entry's exclusive child-slot declaration and injected
       // render helpers; a second registration cannot redeclare that child.
@@ -871,9 +528,9 @@ export function apply(ctx) {
     install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.pane.tab.title', install);
     return () => { unsubscribe(); dispose?.(); };
   }));
-  ctx.effect(() => { const style = document.createElement('style'); style.textContent = styles + themeStyles + loadingStyles + pageControlStyles + editorStyles + previewStyles + amadeusKatexCss; document.head.append(style); return () => style.remove(); });
-  // Add selection provenance around native document bodies without replacing
-  // Markdown rendering, syntax highlighting, or the existing viewer choices.
+  ctx.effect(() => { const style = document.createElement('style'); style.textContent = `${styles + themeStyles + editorStyles + previewStyles + amadeusKatexCss}\n/* Native sidebar PDF/Office text layer: the theme's hover-accent selection is nearly invisible; the lazy PDF chunk also inserts its CSS after ours, so win the tie with !important. */\n[data-pdf-text] ::selection{background:rgba(68,118,254,.45)!important}`; document.head.append(style); return () => style.remove(); });
+  // Add selection provenance around native document bodies (text, PDF, Office)
+  // without replacing their rendering, and honor annotation page jumps.
   ctx.effect(() => ctx.slots.inject('sidebar.right.tab.document', () => {
     const wrapped = new Map();
     const install = () => {
@@ -881,10 +538,17 @@ export function apply(ctx) {
         if (wrapped.has(entry)) continue;
         const Native = entry.component;
         const Annotatable = props => {
-          if (props.content?.kind !== 'text') return <Native {...props} />;
+          if (props.sessionId) activeSession.id = props.sessionId;
+          const host = useRef();
+          const focus = props.useTabInfo?.().tab.navigation.params?.amadeusAnnotation;
+          useEffect(() => {
+            if (!focus?.page || !host.current) return;
+            const frame = requestAnimationFrame(() => host.current?.querySelector(`[data-pdf-page="${focus.page}"]`)?.scrollIntoView({ block: 'start' }));
+            return () => cancelAnimationFrame(frame);
+          }, [focus?.page, focus?.text]);
           let path;
           try { path = sourcePath(props.resourceAddress); } catch { return <Native {...props} />; }
-          return <div className="amadeus-source-document" style={{ display: 'contents' }} data-amadeus-path={path} data-amadeus-format={path.split('.').pop().toLowerCase()} data-amadeus-session={props.sessionId}><Native {...props} /></div>;
+          return <div ref={host} className="amadeus-source-document" style={{ display: 'contents' }} data-amadeus-path={path} data-amadeus-format={path.split('.').pop().toLowerCase()} data-amadeus-session={props.sessionId}><Native {...props} /></div>;
         };
         entry.component = Annotatable;
         wrapped.set(entry, { Native, Annotatable });
@@ -893,8 +557,8 @@ export function apply(ctx) {
     install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.tab.document', install);
     return () => { unsubscribe(); for (const [entry, { Native, Annotatable }] of wrapped) if (entry.component === Annotatable) entry.component = Native; };
   }));
-  ctx.effect(() => ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({ name: 'conversation.input.overlay', id: 'amadeus-annotations' }, props => <AnnotationDock {...props} store={store} />)));
-  ctx.effect(() => installSelection(ctx, store));
+  ctx.effect(() => ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({ name: 'conversation.input.overlay', id: 'amadeus-annotations' }, trackSession(props => <AnnotationDock {...props} store={store} />))));
+  ctx.effect(() => installSelection(ctx, store, activeSession));
   // Override presentation through the public keyed slot; keep native semantic
   // kinds so scrolling, steering, process folding and turn navigation work.
   ctx.effect(() => ctx.slots.inject('conversation.chat.node', () => {
@@ -906,11 +570,12 @@ export function apply(ctx) {
         installed.add(kind);
         const Native = entry.component;
         if (kind === 'assistant-step') {
-          const WrappedAssistant = props => <AssistantWithAnnotationLinks {...props} Native={Native} openAnnotation={openAnnotation} />;
+          const WrappedAssistant = props => { if (props.sessionId) activeSession.id = props.sessionId; return <AssistantWithAnnotationLinks {...props} Native={Native} openAnnotation={openAnnotation} />; };
           disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'amadeus-annotated-assistant' }, WrappedAssistant));
           continue;
         }
         const Wrapped = props => {
+          if (props.sessionId) activeSession.id = props.sessionId;
           const node = props.node;
           const text = node.data.content.filter(b => b.type === 'text').map(b => b.text).join('');
           const amadeus = parseAnnotatedPrompt(text);

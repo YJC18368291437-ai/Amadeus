@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, readFile, readdir, lstat, symlink, rm, mkdir } from 'node:fs/promises';
 import { Readable } from 'node:stream';
-import { upload, zipDirectory } from '../packages/files/src/transfer.mjs';
+import { upload, writeArtifact, zipDirectory } from '../packages/files/src/transfer.mjs';
 import { childWithin, resolveWithin, versionOf } from '../packages/files/src/workspace.mjs';
 import { inspectRemoval, removeConfirmed } from '../packages/files/src/remove.mjs';
 async function workspace(t) {
@@ -23,6 +23,16 @@ test('folder structure, collision approval, atomic commit and transfer limits', 
   await assert.rejects(upload(root, 'large.txt', Readable.from('123456789'), { maxBytes: 4 }), e => e.status === 413);
   assert.equal((await readdir(root)).some(n => n.startsWith('.amadeus-upload-') || n === 'large.txt'), false);
   assert.equal(await readFile(path.join(root, '课程/week1/a.md'), 'utf8'), 'updated');
+});
+test('generated artifacts overwrite atomically and enforce limits', async t => {
+  const root = await workspace(t);
+  await writeArtifact(root, 'build/output.pdf', Readable.from('first'));
+  const result = await writeArtifact(root, 'build/output.pdf', Readable.from('second'));
+  assert.deepEqual(result, { path: 'build/output.pdf', bytes: 6 });
+  assert.equal(await readFile(path.join(root, 'build/output.pdf'), 'utf8'), 'second');
+  await assert.rejects(writeArtifact(root, 'build/too-large.pdf', Readable.from('12345'), { maxBytes: 4 }), e => e.status === 413);
+  await assert.rejects(writeArtifact(root, 'build', Readable.from('not a file')), e => e.status === 409);
+  assert.deepEqual(await readdir(path.join(root, 'build')), ['output.pdf']);
 });
 test('simultaneous new uploads cannot silently replace one another', async t => {
   const root = await workspace(t);

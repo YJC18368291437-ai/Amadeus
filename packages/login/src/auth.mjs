@@ -7,6 +7,10 @@ export function header(req, name) {
   return req.headers instanceof Headers ? req.headers.get(name) : req.headers[name];
 }
 export function sameOrigin(req) {
+  const method = req.method ? req.method.toUpperCase() : undefined;
+  const mode = header(req, 'sec-fetch-mode');
+  const dest = header(req, 'sec-fetch-dest');
+  if (method === 'GET' && (mode === 'navigate' || dest === 'document')) return true;
   if (header(req, 'sec-fetch-site') === 'cross-site') return false;
   const host = header(req, 'host');
   if (!host || /[\s/@\\]/.test(host)) return false;
