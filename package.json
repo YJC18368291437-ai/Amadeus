@@ -1,6 +1,6 @@
 {
   "name": "amadeus-workspace",
-  "version": "1.1.0-alpha.1",
+  "version": "1.1.0-alpha.2",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -9,6 +9,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.mjs",
+    "test:editor-browser": "node tests/editor-browser.mjs",
     "start": "node scripts/start.mjs",
     "pack:plugins": "node scripts/pack.mjs",
     "setup:browsers": "node node_modules/@playwright/mcp/cli.js install-browser --with-deps chromium"
@@ -26,17 +27,9 @@
     "yazl": "3.3.1"
   },
   "devDependencies": {
-    "@codemirror/commands": "6.11.1",
-    "@codemirror/language-data": "6.5.2",
-    "@codemirror/merge": "6.12.2",
     "@playwright/mcp": "0.0.82",
     "@playwright/test": "1.58.2",
-    "codemirror": "6.0.2",
     "esbuild": "0.25.12",
-    "katex": "0.18.7",
-    "markdown-it": "15.0.2",
-    "markdown-it-texmath": "1.0.0",
-    "node-diff3": "3.2.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

@@ -1,0 +1,23 @@
+{
+  "name": "amadeus-bridge",
+  "displayName": "Amadeus Editor Bridge",
+  "publisher": "amadeus",
+  "version": "1.0.0",
+  "engines": { "vscode": "^1.96.0" },
+  "main": "./extension.cjs",
+  "activationEvents": ["onStartupFinished"],
+  "extensionKind": ["workspace"],
+  "contributes": {
+    "configuration": {
+      "title": "Amadeus",
+      "properties": {
+        "amadeus.bridgeId": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "Private workspace bridge identifier managed by Amadeus."
+        }
+      }
+    }
+  }
+}

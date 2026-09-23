@@ -1,0 +1,15 @@
+# Copy to amadeus.local.yml; do not commit real credentials.
+username: amadeus
+password: CHANGE-ME
+host: 0.0.0.0
+port: 3080
+home: /data/dsh-home
+workspace: /workspace
+sessionHours: 12
+maxUploadBytes: 1073741824
+maxPreviewBytes: 268435456
+editor:
+  upstream: http://127.0.0.1:8080
+  bridgeDir: /data/editor/bridge
+playwrightMcp:
+  enabled: true

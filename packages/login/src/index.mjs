@@ -2,6 +2,7 @@ import WebServer from '@deepseek-ai/dsh-host-webserver';
 import z from '@deepseek-ai/schemastery';
 import { createAuth } from './auth.mjs';
 import { injectBrowserCompatibility } from './browser-compat.mjs';
+import { PrefixUpgradeRoutes } from './upgrade-routes.mjs';
 
 // Substitution is restricted to the webserver composition row; no global dsh files change.
 export default class AmadeusWebServer extends WebServer {
@@ -17,6 +18,9 @@ export default class AmadeusWebServer extends WebServer {
   constructor(ctx, config) {
     const auth = createAuth(config);
     super(ctx, config);
+    // DSH dispatches upgrades via Map.get; add prefix fallback for code-server's
+    // versioned transport and dynamically forwarded extension webview ports.
+    this.upgrades = new PrefixUpgradeRoutes(this.upgrades);
     this.auth = auth;
     ctx.effect(() => this.tapIndex(injectBrowserCompatibility));
     ctx.inject(['connection'], scope => {

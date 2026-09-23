@@ -1,13 +1,15 @@
 import path from 'node:path';
 import { readdir, lstat, mkdir } from 'node:fs/promises';
 import { sessionRoot, resolveWithin, HttpError, json, routeErrors } from './workspace.mjs';
-import { upload, download, writeArtifact } from './transfer.mjs';
+import { upload, download } from './transfer.mjs';
 import { inspectRemoval, removeConfirmed } from './remove.mjs';
-import { DEFAULT_MAX_TEXT_BYTES, readTextRequest, readTextSource, saveTextSource, statTextSource } from './source.mjs';
 
-export const inject = ['webServer', 'sessions'];
+export const inject = ['webServer', 'sessions', 'workspaceRegistry'];
 
-export function apply(ctx, config = {}) {
+export async function apply(ctx, config = {}) {
+  // Remote browsers cannot use DSH's host-native directory picker. Register the
+  // configured mount before the first browser session; create is path-idempotent.
+  if (config.workspace) await ctx.workspaceRegistry.create(path.resolve(config.workspace));
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/amadeus/files', handler: routeErrors(async (req, res) => {
     const url = new URL(req.url, 'http://amadeus');
     const root = await sessionRoot(ctx, url.searchParams.get('session'));
@@ -20,26 +22,10 @@ export function apply(ctx, config = {}) {
       return json(res, 200, await removeConfirmed(root, input, url.searchParams.get('version')));
     }
     if (req.method === 'GET' && url.pathname === '/amadeus/files/download') return download(root, input, req, res);
-    if (req.method === 'GET' && url.pathname === '/amadeus/files/source') {
-      if (url.searchParams.get('metadata') === '1') return json(res, 200, await statTextSource(root, input, { maxBytes: config.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES }));
-      return json(res, 200, await readTextSource(root, input, { maxBytes: config.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES }));
-    }
-    if (req.method === 'PUT' && url.pathname === '/amadeus/files/source') {
-      const maxBytes = config.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES;
-      if (Number(req.headers['content-length']) > maxBytes) throw new HttpError(413, 'Text file exceeds the configured size limit');
-      const text = await readTextRequest(req, { maxBytes });
-      return json(res, 200, await saveTextSource(root, input, text, url.searchParams.get('expectedVersion'), { maxBytes }));
-    }
     if (req.method === 'PUT' && url.pathname === '/amadeus/files/upload') {
       const maxBytes = config.maxUploadBytes ?? 1024 ** 3;
       if (Number(req.headers['content-length']) > maxBytes) throw new HttpError(413, 'Upload exceeds the configured file size limit');
       return json(res, 201, await upload(root, input, req, { maxBytes, overwriteVersion: url.searchParams.get('overwriteVersion') || undefined }));
-    }
-    if (req.method === 'PUT' && url.pathname === '/amadeus/files/artifact') {
-      // Generated artifacts (e.g. LaTeX-compiled PDFs) overwrite their previous version unconditionally.
-      const maxBytes = config.maxUploadBytes ?? 1024 ** 3;
-      if (Number(req.headers['content-length']) > maxBytes) throw new HttpError(413, 'Artifact exceeds the configured file size limit');
-      return json(res, 200, await writeArtifact(root, input, req, { maxBytes }));
     }
     if (req.method === 'POST' && url.pathname === '/amadeus/files/mkdir') {
       const target = await resolveWithin(root, input, { createParents: true, allowMissing: true });

@@ -1,0 +1,16 @@
+.git
+node_modules
+**/node_modules
+**/dist
+.amadeus
+.release
+amadeus.local.yml
+amadeus-workspace
+workspace
+tmp
+test-results
+playwright-report
+*.log
+.env
+.env.*
+!.env.example

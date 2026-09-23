@@ -1,0 +1,18 @@
+services:
+  amadeus:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3080:3080"
+    environment:
+      AMADEUS_CONFIG: /config/amadeus.yml
+    volumes:
+      # Set host: 0.0.0.0, home: /data/dsh-home and workspace: /workspace
+      # in this configuration. Supply real login credentials before starting.
+      - ./amadeus.local.yml:/config/amadeus.yml:ro
+      - ./workspace:/workspace
+      - amadeus-data:/data
+    stop_grace_period: 30s
+
+volumes:
+  amadeus-data:

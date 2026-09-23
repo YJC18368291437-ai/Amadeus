@@ -1,0 +1,138 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import bridgeModule from '../packages/editor/extension/extension.cjs';
+
+test('editor bridge authenticates, confines files, and exposes only editor actions', async t => {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'amadeus-editor-'));
+  const workspace = path.join(temporary, 'project');
+  const directory = path.join(temporary, 'bridge');
+  await fs.mkdir(workspace);
+  const file = path.join(workspace, 'paper.tex');
+  const outside = path.join(temporary, 'outside.tex');
+  await fs.writeFile(file, 'hello');
+  await fs.writeFile(outside, 'secret');
+  const calls = [];
+  const document = { uri: { scheme: 'file', fsPath: file }, lineCount: 1, getText: () => 'hello', positionAt: character => ({ line: 0, character }) };
+  const current = { document, selection: { start: { line: 0 }, end: { line: 0 } }, revealRange() {} };
+  const vscode = {
+    workspace: { getConfiguration: () => ({ get: () => 'a'.repeat(64) }), workspaceFolders: [{ uri: { fsPath: workspace } }], textDocuments: [{ isDirty: true }], openTextDocument: async () => document },
+    window: { activeTextEditor: current, showTextDocument: async () => current, showErrorMessage() {} },
+    commands: { executeCommand: async command => calls.push(command) },
+    Uri: { file: fsPath => ({ fsPath }) },
+    Position: class { constructor(line, character) { this.line = line; this.character = character; } },
+    Selection: class { constructor(start, end) { this.start = start; this.end = end; } },
+    Range: class { constructor(start, end) { this.start = start; this.end = end; } }
+  };
+  const bridge = await bridgeModule.createBridge(vscode, directory);
+  t.after(async () => { await bridge.dispose(); await fs.rm(temporary, { recursive: true, force: true }); });
+  const registration = JSON.parse(await fs.readFile(path.join(directory, `${'a'.repeat(64)}.json`), 'utf8'));
+  assert.match(registration.token, /^[a-f0-9]{64}$/);
+  assert.equal(registration.workspace, workspace);
+  const invoke = (body, token = registration.token) => fetch(`http://127.0.0.1:${registration.port}/command`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+  assert.equal((await invoke({ action: 'status' }, 'invalid')).status, 401);
+  assert.deepEqual(await (await invoke({ action: 'status' })).json(), { dirty: true });
+  assert.equal((await invoke({ action: 'open', path: outside })).status, 403);
+  assert.equal((await invoke({ action: 'open', path: 'paper.tex' })).status, 400);
+  assert.equal((await invoke({ action: 'open', path: file, text: 'ell' })).status, 200);
+  assert.equal(current.selection.start.character, 1);
+  assert.equal(current.selection.end.character, 4);
+  assert.deepEqual(await (await invoke({ action: 'selection' })).json(), { text: 'hello', path: 'paper.tex', lineStart: 1, lineEnd: 1 });
+  assert.equal((await invoke({ action: 'executeCommand', command: 'terminal.new' })).status, 400);
+  for (const action of ['save', 'undo', 'redo', 'markdown-preview', 'latex-build', 'latex-preview']) {
+    assert.equal((await invoke({ action })).status, 400);
+  }
+  assert.deepEqual(calls, []);
+  document.getText = () => 'x'.repeat(50000);
+  assert.equal((await invoke({ action: 'selection' })).status, 200);
+  document.getText = () => 'x'.repeat(50001);
+  assert.equal((await invoke({ action: 'selection' })).status, 413);
+  assert.equal((await invoke({ action: 'open', path: file, text: 'a'.repeat(66000) })).status, 413);
+});
+
+test('unconfigured workbench skips bridge startup quietly', async () => {
+  const vscode = { workspace: { getConfiguration: () => ({ get: () => '' }) } };
+  assert.equal(await bridgeModule.createBridge(vscode), undefined);
+});
+
+test('bridge activation waits for folders, replaces registrations, and disposes late startup', async t => {
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'amadeus-activation-'));
+  const directory = path.join(temporary, 'bridge');
+  let id = 'a'.repeat(64), folderListener, configListener, disposedListeners = 0;
+  const errors = [];
+  const vscode = {
+    workspace: {
+      getConfiguration: () => ({ get: () => id }), workspaceFolders: undefined,
+      onDidChangeWorkspaceFolders: callback => { folderListener = callback; return { dispose: () => disposedListeners++ }; },
+      onDidChangeConfiguration: callback => { configListener = callback; return { dispose: () => disposedListeners++ }; },
+    },
+    window: { showErrorMessage: message => errors.push(message) },
+    commands: { executeCommand: async () => {} },
+  };
+  const service = bridgeModule.startBridgeService(vscode, { directory, retryMs: 5, startupMs: 100 });
+  t.after(async () => { await service.dispose(); await fs.rm(temporary, { recursive: true, force: true }); });
+  await service.refresh();
+  assert.deepEqual(errors, [], 'folders arriving late must not toast');
+  vscode.workspace.workspaceFolders = [{ uri: { fsPath: temporary } }];
+  folderListener(); await service.refresh();
+  assert.equal(JSON.parse(await fs.readFile(path.join(directory, `${id}.json`), 'utf8')).workspace, temporary);
+  const previous = id;
+  id = 'b'.repeat(64);
+  configListener({ affectsConfiguration: key => key === 'amadeus.bridgeId' });
+  await service.refresh();
+  await assert.rejects(fs.stat(path.join(directory, `${previous}.json`)), { code: 'ENOENT' });
+  await fs.stat(path.join(directory, `${id}.json`));
+  await service.dispose();
+  await assert.rejects(fs.stat(path.join(directory, `${id}.json`)), { code: 'ENOENT' });
+  assert.equal(disposedListeners, 2);
+  assert.deepEqual(errors, []);
+
+  let release, started;
+  const startup = new Promise(resolve => { started = resolve; });
+  let lateDisposed = false;
+  const late = bridgeModule.startBridgeService(vscode, { factory: async () => {
+    started(); await new Promise(resolve => { release = resolve; });
+    return { dispose: async () => { lateDisposed = true; } };
+  } });
+  await startup;
+  const stopped = late.dispose(); release(); await stopped;
+  assert.equal(lateDisposed, true, 'late registration must be removed after deactivation');
+});
+
+test('managed empty workspace recovery touches unchanged config once and then registers arriving folders', async t => {
+  const temporary = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'amadeus-rescan-')));
+  const id = 'c'.repeat(64), file = path.join(temporary, `${id}.code-workspace`);
+  const content = JSON.stringify({ folders: [{ path: temporary }], settings: { 'amadeus.bridgeId': id } });
+  await fs.writeFile(file, content);
+  await fs.utimes(file, new Date(1000), new Date(1000));
+  const vscode = {
+    workspace: {
+      workspaceFolders: [], workspaceFile: { scheme: 'file', fsPath: file },
+      getConfiguration: () => ({ get: () => id }),
+      onDidChangeWorkspaceFolders: () => ({ dispose() {} }), onDidChangeConfiguration: () => ({ dispose() {} }),
+    },
+    window: { showErrorMessage: message => assert.fail(message) }, commands: { executeCommand: async () => {} },
+  };
+  const service = bridgeModule.startBridgeService(vscode, { directory: temporary, recoveryMs: 0 });
+  t.after(async () => { await service.dispose(); await fs.rm(temporary, { recursive: true, force: true }); });
+  await service.refresh();
+  const modified = (await fs.stat(file)).mtimeMs;
+  assert.ok(modified > 1000);
+  await service.refresh(); await service.refresh();
+  assert.equal((await fs.stat(file)).mtimeMs, modified, 'rescan happens once per workspace');
+  assert.equal(await fs.readFile(file, 'utf8'), content);
+  vscode.workspace.workspaceFolders = [{ uri: { fsPath: temporary } }];
+  await service.refresh();
+  await fs.stat(path.join(temporary, `${id}.json`));
+  vscode.workspace.workspaceFolders = [];
+  assert.equal(await bridgeModule.rescanManagedWorkspace(vscode, () => false), false, 'cancelled activation cannot touch config');
+  vscode.workspace.workspaceFile.fsPath = path.join(temporary, 'unmanaged.code-workspace');
+  assert.equal(await bridgeModule.rescanManagedWorkspace(vscode), false);
+  vscode.workspace.workspaceFile.fsPath = file;
+  await fs.writeFile(file, JSON.stringify({ folders: [{ path: temporary }], settings: { 'amadeus.bridgeId': 'd'.repeat(64) } }));
+  assert.equal(await bridgeModule.rescanManagedWorkspace(vscode), false);
+  await fs.writeFile(file, JSON.stringify({ folders: [{ path: '.' }], settings: { 'amadeus.bridgeId': id } }));
+  assert.equal(await bridgeModule.rescanManagedWorkspace(vscode), false);
+});

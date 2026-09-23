@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.1.0-alpha.2 — 2026-09-23（预发布）
+
+- 新增 `dsh-amadeus-editor`：同源认证 HTTP/WebSocket 代理、DSH 文件打开入口、每个工作台的持久化 VS Code 工作区及仅负责打开文件、读取选区/保存状态的私有桥接。
+- 代码编辑、保存、撤销重做和 Markdown 侧边预览改由 code-server 提供；编辑选区可加入原有 DSH 注释对话。
+- 新增 Docker Compose 部署，镜像包含 LaTeX Workshop、TeX Live、XeLaTeX、latexmk、Biber 与中文字体。TeX 在容器内编译，不再由浏览器下载宏包或执行 WASM。
+- 删除自建 CodeMirror 编辑器、草稿/合并状态管理、Markdown 渲染和打印组件、SwiftLaTeX 资产，以及旧 `/amadeus/files/source`、`/amadeus/files/artifact`、`/amadeus/texlive` 路由。
+- 删除配置 `maxTextBytes`、`kpsewhich`、`texliveUpstream`；新增 `editor.upstream`、`editor.bridgeDir`。Docker 使用独立配置示例，保留原有原生 PDF/Office 预览与会话认证。
+- 迁移前保存旧编辑器中的未保存内容。新版编辑器使用 VS Code 自身的工作区恢复数据，不能导入旧版内存草稿。
+
+- 修复切换 DSH 标签导致编辑器重载；保留 iframe、草稿和工作区身份，并适配浮动/全屏布局。
+- 转发工作台及扩展动态端口的 WebSocket，修复中文 PDF 字体资源在代理子路径下的加载，并增加工作区冷启动恢复。
+- 使用 code-server / LaTeX Workshop 原生按钮、快捷键和 TeX 右键菜单，移除重复操作栏。
+- 改善中文输入法组合输入、原生 PDF 缩放与页码控件；新增连接延迟显示和可配置的原生文件预览读取上限。
+- 主项目与 Login、Files、Reader、Editor 四个插件统一版本为 `1.1.0-alpha.2`；DSH 固定为 `0.1.6-alpha.2`。
+- 已通过 50 项 Node 测试、浏览器生命周期回归、Docker 构建及真实 MD/中文 TeX/PDF 验证；Android 平板和实际穿透网络仍需实机验收。
+
 ## 1.1.0-alpha.1（预发布）
 
 基于 `@deepseek-ai/dsh@0.1.6-alpha.2` 的兼容重写，删除与 DSH 原生能力重复的代码。

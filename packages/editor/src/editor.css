@@ -1,0 +1,9 @@
+.amadeus-code-workbench{height:100%;min-height:0;min-width:0;display:flex;flex:1 1 0;flex-direction:column;overflow:hidden}
+.amadeus-code-toolbar{display:flex;flex-wrap:wrap;gap:5px;padding:6px;border-bottom:1px solid var(--dsw-alias-border-l4);align-items:center;flex:none}
+.amadeus-code-toolbar button,.amadeus-code-error button{font:inherit;font-size:12px;padding:6px 9px;border:1px solid var(--dsw-alias-border-l4);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:inherit;cursor:pointer}
+.amadeus-code-toolbar button:disabled{opacity:.45;cursor:default}
+.amadeus-code-toolbar span{font-size:12px;opacity:.7}
+.amadeus-code-frame{border:0;width:100%;flex:1;min-height:0;background:var(--dsw-alias-bg-base)}
+.amadeus-code-placeholder{flex:1;min-height:0;min-width:0}
+.amadeus-code-error{padding:8px;color:#c94b40;flex:none;overflow-wrap:anywhere}
+[data-amadeus-reader-host],[data-amadeus-reader-pane]{min-height:0;display:flex;flex-direction:column;flex:1;overflow:hidden}

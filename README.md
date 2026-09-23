@@ -7,26 +7,26 @@
 <p align="center">扩展 DSH 的文档查看、文本编辑与选区对话能力</p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.1.0--alpha.1-4d6bfe">
+  <img alt="Version" src="https://img.shields.io/badge/version-1.1.0--alpha.2-4d6bfe">
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24%2B-43853D">
   <img alt="DSH" src="https://img.shields.io/badge/DSH-0.1.6--alpha.2-536DFE">
 </p>
 
-![Amadeus 产品首页](docs/assets/amadeus-home.png)
+![Amadeus 内嵌 code-server 与 TeX 预览](docs/assets/amadeus-code-server.png)
 
 Amadeus 是一组面向单用户服务器工作台的 DSH 插件。它把项目文件、文档阅读、代码编辑和选区对话放在同一个界面中，使 DSH 可以直接处理 PDF、Office、Markdown、LaTeX 和常见文本文件。PDF、Office 与终端预览由 DSH 原生侧栏提供，Amadeus 负责编辑器、编译和选区对话。
 
-`v1.1.0-alpha.1` 基于 `@deepseek-ai/dsh@0.1.6-alpha.2` 重建：移除了与原生能力重复的终端插件和 ONLYOFFICE 转换链路，为原生 PDF/Office 文字层补上清晰的蓝色选中高亮。
+`v1.1.0-alpha.2` 基于 `@deepseek-ai/dsh@0.1.6-alpha.2`，将编辑器迁至内嵌 code-server，并通过 Docker 内的 TeX Live 编译 LaTeX。保留原生 PDF/Office 预览、选区问答及中文输入增强。
 
 ## 主要能力
 
 | 领域 | 能力 |
 | --- | --- |
 | 文档阅读 | DSH 原生侧栏预览 PDF 与 Office 文档（含 Excel），Amadeus 注入清晰的蓝色选中高亮，注释引用可跳转到原文页 |
-| 文本编辑 | CodeMirror 6 语法高亮、自动换行、字号缩放、撤销/重做、`Ctrl/Cmd+S`、未保存状态与关闭确认 |
-| 保存冲突 | 文件版本比较、服务器版本/本地版本选择、自动合并非重叠修改、`@codemirror/merge` 三方差异编辑 |
-| Markdown | 安全解析、浏览器 KaTeX 数学公式、同标签预览、右侧并排预览与打印导出 |
-| LaTeX | SwiftLaTeX XeTeX/dvipdfmx WASM 编译、`ctexart`、中文字体、常用 TikZ、PDF 文字层与下载 |
+| 文本编辑 | 内嵌 code-server：文件标签、补全、查找替换、撤销/重做与保存；同一侧栏工作台内切换文件 |
+| 文件同步 | 文件读写、外部修改检测及保存冲突处理由 VS Code 工作台负责；不再维护第二份浏览器草稿 |
+| Markdown | code-server 内置 Markdown 预览、侧边预览与滚动联动 |
+| LaTeX | Docker 内 TeX Live + latexmk/XeLaTeX + LaTeX Workshop；支持项目子文件、图片、参考文献与 PDF 预览 |
 | 选区对话 | 对话或文件选区加入注释（含原生 PDF 预览内的选区页码），回答中的蓝色引用支持悬浮查看和原文定位，原选区以浅蓝荧光高亮 |
 | 文件管理 | 文件和文件夹上传、ZIP 下载、重名确认、删除确认、目录轮询与服务器变更自动刷新 |
 | 远程访问 | 浏览器原生 Basic 认证、HTTPS 反向代理、登录后完整 DSH 设置能力 |
@@ -38,53 +38,60 @@ Amadeus 是一组面向单用户服务器工作台的 DSH 插件。它把项目�
 浏览器
   ├─ DSH 对话与模型能力
   ├─ DSH 原生侧栏：PDF/Office 预览（文字层 + 蓝色选中）、终端、浏览器
-  └─ Amadeus：文件树 / CodeMirror / KaTeX / SwiftLaTeX
+  └─ Amadeus：文件树 / 内嵌 code-server / 选区问答
           │
 Amadeus Node.js 服务
   ├─ 认证与静态前端
-  └─ 文件、保存和 TeX Live 路由
+  ├─ 文件路由、code-server HTTP/WebSocket 认证代理
+  └─ Docker：code-server、Amadeus Bridge、LaTeX Workshop、TeX Live
 ```
 
-Office 文件由 DSH 原生 `dsh-office-to-pdf`（LibreOffice 引擎）转换为 PDF 并在侧栏渲染可选择文字层；Amadeus 把选中色覆盖为固定的半透明蓝。Markdown 在浏览器中解析；LaTeX 在浏览器 WASM 中编译，服务器只通过 `kpsewhich` 提供所需 TeX Live 文件。
+Office 文件由 DSH 原生 `dsh-office-to-pdf`（LibreOffice 引擎）转换为 PDF 并在侧栏渲染可选择文字层；Amadeus 把选中色覆盖为固定的半透明蓝。Markdown 在 code-server 的浏览器预览中渲染；LaTeX 由 Docker 内的 TeX Live 编译。Pad 无需加载 SwiftLaTeX WASM、宏包和编译字体。
 
-## 环境要求
+## Docker 部署（电脑运行，Pad 远程访问）
 
-- Linux 服务器，推荐 Ubuntu 24.04 x86_64
-- Node.js 24 或更高版本
-- npm
-- LaTeX 预览所需的 XeTeX、中文与 TikZ TeX Live 包
-- 公网部署使用 nginx 或等价反向代理提供 HTTPS
-
-## 安装
+安装 Docker Desktop（Linux 容器）或 Docker Engine / Compose。
 
 ```bash
-git clone https://github.com/whyself/Amadeus.git
-cd Amadeus
-npm ci
-npm run build
-cp amadeus.example.yml amadeus.local.yml
-chmod 600 amadeus.local.yml
+cp amadeus.docker.example.yml amadeus.local.yml
+mkdir -p workspace
+# 编辑 amadeus.local.yml，设置真实的用户名和密码。
+docker compose up -d --build
 ```
 
-编辑 `amadeus.local.yml`：
+若当前网络无法访问 Docker Hub，可先执行 `docker compose build --build-arg NODE_IMAGE=public.ecr.aws/docker/library/node:24-bookworm-slim`，通过 Docker Official Images 的 AWS 镜像源获取基础镜像，再执行 `docker compose up -d`。
 
-```yaml
-username: your-name
-password: 'replace-with-a-long-random-password'
-host: 127.0.0.1
-port: 3080
-workspace: /srv/amadeus-workspace
-```
+浏览器访问 `http://127.0.0.1:3080`。内网穿透指向电脑的 `127.0.0.1:3080`，对外提供有效证书的 **HTTPS**；代理须支持 WebSocket。Android 浏览器中的 Markdown/PDF webview 依赖安全上下文，不能用远程 HTTP 地址代替 HTTPS。
 
-执行 `npm start`，访问 `http://127.0.0.1:3080`。登录后在 DSH 设置中配置模型。登录密码与模型 API 密钥分别管理。
+镜像包含 code-server、LaTeX Workshop、TeX Live/XeLaTeX、latexmk、Biber 和中文字体。首次构建需要下载这些组件，体积明显大于旧版 Node 服务。`workspace/` 挂载为 `/workspace`；命名卷保存 DSH 会话、VS Code 设置、扩展及编辑器恢复数据。不要删除数据卷来更新版本。
 
-## LaTeX 支持
+默认只向电脑回环地址发布 3080；8080 上的无密码 code-server 仅在容器回环地址监听，经 Amadeus 已认证的 HTTP/WebSocket 路由访问。
 
-```bash
-sudo apt install texlive-xetex texlive-lang-chinese texlive-pictures texlive-latex-extra
-```
+启动时会自动注册配置的 `/workspace`，Pad 可以直接选择该工作区；无需调用宿主机的原生目录选择窗口。要换挂载目录，修改 Compose 的工作区挂载和配置中的 `workspace`。
 
-浏览器首次编译时会下载并缓存格式、宏包和字体，因此耗时较长。后续编译复用 IndexedDB 和服务器的 TeX Live 缓存。用户 `.tex` 文件不会在服务器执行。
+打开文本、代码、`.md` 或 `.tex` 文件会进入内嵌编辑器；同一侧栏中的后续文件在 VS Code 内打开标签。PDF、Office 等文档仍使用 DSH 原生预览。保存、撤销、MD 预览和 TeX 编译均使用 code-server / LaTeX Workshop 原生界面与快捷键；Amadeus 仅保留「选区加入对话」桥接动作和连接错误提示。
+
+常用快捷键：`Ctrl+S` 保存、`Ctrl+Z` 撤销、`Ctrl+Shift+Z` 重做、`Ctrl+Shift+V` Markdown 预览、`Ctrl+K` 后按 `V` Markdown 侧边预览；LaTeX Workshop 默认 `Ctrl+Alt+B` 编译、`Ctrl+Alt+V` 查看 PDF。全部命令可在 `Ctrl+Shift+P` 命令面板中查找。
+
+已开启 LaTeX Workshop 原生右键菜单（编译、SyncTeX 定位）；TeX 编译/PDF 查看和 Markdown 侧边预览也有编辑器右上角入口。Markdown「打开预览」还位于 code-server 自带文件树的右键菜单中。
+
+![原生 TeX 右键菜单与快捷键](docs/assets/amadeus-native-context.png)
+
+### LaTeX
+
+默认配方为 `latexmk -xelatex`，由 LaTeX Workshop 管理主文件、重复编译、日志和 PDF 查看。多文件论文可在源码中使用 `% !TEX root = ../main.tex` 指定主文件。中文模板可使用 `ctexart`；特殊宏包或字体仍需加入镜像。`latex-workshop.latex.autoBuild.run` 默认是 `never`，避免每次键入都触发编译与 PDF 重传。
+
+镜像对固定版本 LaTeX Workshop 的 PDF 字体资源相对路径应用兼容补丁，使中文 CMap 和标准字体能通过内嵌子路径加载。更换扩展版本时需同时验证并更新该补丁。
+
+保存的 TeX 源码和编译产物均在项目目录；不再提供 `/amadeus/texlive` 或浏览器编译接口。原来的打印导出和手写 Markdown 渲染器也已移除，所需额外 Markdown 能力可通过兼容 VS Code 扩展添加。
+
+### 从旧版升级
+
+升级前请保存旧编辑器里的草稿，并备份 DSH 数据目录和项目文件。迁入 Docker 时，历史会话和工作区记录中的路径必须与容器内挂载路径对应，不能直接沿用 Windows 路径。已有密钥文件应迁入具备 Linux 权限语义的数据卷并保持仅所有者可读；不要通过放宽权限检查来迁移。
+
+### 非 Docker 开发
+
+仍可运行 `npm ci && npm run build && npm start`，但编辑器需要另外启动 code-server 并安装 `packages/editor/extension` 中的桥接扩展及 LaTeX Workshop。将 code-server 配置为回环地址 `--auth none`，其进程的 `AMADEUS_EDITOR_BRIDGE_DIR` 必须与 Amadeus `editor.bridgeDir` 指向同一路径；Amadeus 的认证代理同时转发工作台及扩展动态端口的 WebSocket。完整配置见 [示例](amadeus.example.yml)。Docker 已完成这些配置。
 
 ## Playwright MCP 浏览器自动化
 
@@ -119,24 +126,24 @@ sudo journalctl -u amadeus.service -f
 
 公网部署应让 Amadeus 监听回环地址，由 nginx 提供 HTTPS。nginx 模板已包含 WebSocket、长连接和大文件上传设置。不要同时暴露另一套未认证的 DSH 服务。
 
-可用 `AMADEUS_CONFIG=/absolute/path/config.yml` 指定外部配置文件。`home` 保存 DSH 会话、模型配置和 TeX Live 缓存；升级前应先备份，不能把整个数据目录当作普通缓存删除。
+可用 `AMADEUS_CONFIG=/absolute/path/config.yml` 指定外部配置文件。`home` 保存 DSH 会话、模型配置和编辑器工作区；升级前应先备份，不能把整个数据目录当作普通缓存删除。
 
 ## 配置
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
 | `maxUploadBytes` | `1073741824` | 单文件上传上限，1 GiB |
-| `maxTextBytes` | `5242880` | 可编辑 UTF-8 文本上限，5 MiB |
+| `maxPreviewBytes` | `268435456` | 原生 PDF 等文件预览的完整文件读取上限，256 MiB；修改 `amadeus.local.yml` 后重启生效 |
 | `sessionHours` | `12` | 登录 WebSocket 凭据有效期 |
 | `playwrightMcp.enabled` | `true` | 是否启用 Playwright MCP 浏览器自动化 |
 | `playwrightMcp.browser` | `'chromium'` | 默认浏览器，可选 chrome, msedge 等 |
 
-默认数据目录为 `<项目>/.amadeus/dsh-home`，TeX Live 缓存位于 `<home>/texlive-cache`。
+Docker 数据目录为 `/data/dsh-home`，编辑器设置与扩展位于 `/data/code-server`；生成的工作区保存在 `<home>/editor/workspaces`。非 Docker 默认数据目录仍为 `<项目>/.amadeus/dsh-home`。
 
 ## 权限与边界
 
 - Amadeus 是单用户工作台。登录用户能够操作项目文件、终端和 DSH 设置，应视为可信服务器用户。
-- 文件 API 限定在当前会话工作区，拒绝目录越界和符号链接逃逸；工作区根目录不能删除。
+- 文件 API 和编辑器文件打开桥接限定在当前会话工作区；code-server 是完整 IDE，扩展和终端拥有容器用户权限，不能将桥接路径检查视为多用户安全沙箱。工作区根目录不能通过文件 API 删除。
 - Basic 认证必须由 HTTPS 保护。HTTP 非安全来源中的 UUID 兼容实现不替代传输加密。
 - PDF/Office 渲染与转换由 DSH 原生侧栏完成；扫描件无文字层，且不包含 OCR。
 - Office 转换（LibreOffice 引擎）、字体替换、复杂公式和演示特效可能与原软件存在显示差异。
@@ -149,24 +156,28 @@ npm run build
 npm run pack:plugins
 ```
 
+编辑器前端生命周期回归可运行 `npm run test:editor-browser`（默认使用已安装的 Edge，可用 `TEST_BROWSER_CHANNEL=chrome` 切换）。该测试验证文件切换、刷新恢复与多窗口隔离，使用模拟编辑器；真实 code-server、LaTeX 和 Pad 体验仍需在 Docker 环境验证。
+
 打包结果位于 `.release/`：
 
-- `dsh-amadeus-login-1.0.1.tgz`
-- `dsh-amadeus-files-1.0.3.tgz`
-- `dsh-amadeus-reader-1.1.0-alpha.1.tgz`
+- `dsh-amadeus-login-1.1.0-alpha.2.tgz`
+- `dsh-amadeus-files-1.1.0-alpha.2.tgz`
+- `dsh-amadeus-reader-1.1.0-alpha.2.tgz`
+- `dsh-amadeus-editor-1.1.0-alpha.2.tgz`
 
 代码结构：
 
 ```text
 packages/login      认证和静态服务入口
 packages/files      文件浏览与传输
-packages/reader     CodeMirror、Markdown、LaTeX 与注释
+packages/reader     原生文档增强与选区注释
+packages/editor     code-server 代理、侧栏及 VS Code 桥接扩展
 scripts             构建、打包和启动
 tests               Node 集成与状态测试
 ui                  Amadeus 共享样式
 ```
 
-注释提示结构见 [docs/codex-selection-format.md](docs/codex-selection-format.md)。reader 插件附带 SwiftLaTeX v20022022 的 XeTeX/dvipdfmx WebAssembly 资产、许可证和源码地址。
+注释提示结构见 [docs/codex-selection-format.md](docs/codex-selection-format.md)。code-server 与 LaTeX Workshop 由 Docker 镜像安装；浏览器编译资产已删除。
 
 ## 1.0 升级说明
 

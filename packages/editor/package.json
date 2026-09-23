@@ -1,5 +1,5 @@
 {
-  "name": "dsh-amadeus-reader",
+  "name": "dsh-amadeus-editor",
   "version": "1.1.0-alpha.2",
   "type": "module",
   "main": "dist/index.mjs",
@@ -10,16 +10,14 @@
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "files": [
-    "dist/client.js",
-    "dist/index.mjs",
+    "dist",
+    "extension",
     "cordis.patch.yml"
   ],
   "dsh": {
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-ui-sidebar-documentpreview",
         "@deepseek-ai/dsh-client-ui-sidebar-right",
-        "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-session"
       ],
       "platform": "web"
@@ -30,15 +28,5 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/whyself/Amadeus.git"
-  },
-  "keywords": [
-    "dsh",
-    "dsh-plugin",
-    "deepseek-harness",
-    "amadeus"
-  ]
+  }
 }

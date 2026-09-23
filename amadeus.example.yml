@@ -4,15 +4,17 @@ password: CHANGE-ME
 host: 127.0.0.1
 port: 3080
 sessionHours: 12
-# Default home: <project>/.amadeus/dsh-home; TeX Live cache remains <home>/texlive-cache.
+# Default home: <project>/.amadeus/dsh-home; generated editor workspaces: <home>/editor/workspaces.
 # home: /srv/amadeus/data
 # Optional default workspace for new sessions (must already exist):
 # workspace: /srv/amadeus-workspace
 maxUploadBytes: 1073741824
-# Maximum editable UTF-8 text file size (5 MiB).
-maxTextBytes: 5242880
-# Optional TeX Live lookup executable for LaTeX packages not bundled with Amadeus.
-# kpsewhich: /usr/bin/kpsewhich
+# Maximum complete-file read for native PDF/file previews (256 MiB); restart after changing.
+maxPreviewBytes: 268435456
+# Embedded code-server (Docker configures these paths automatically).
+# editor:
+#   upstream: http://127.0.0.1:8080
+#   bridgeDir: /data/editor/bridge
 
 # Playwright MCP browser automation support (enabled by default).
 # Automatically checks and downloads chromium on startup if not present.

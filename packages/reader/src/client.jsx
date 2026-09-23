@@ -5,16 +5,9 @@ import { createAnnotationStore, findAnnotationReferences, locateConversationQuot
 import styles from '../../../ui/amadeus.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 import { reconcileAnnotationDraft, stripAnnotationDraftMarker } from './reader-state.mjs';
-import { createDocumentStore } from './document-store.mjs';
 import { parseEditableAddress } from './file-address.mjs';
-import { editorKind } from './editor-routing.mjs';
-import { TextEditorTab } from './text-editor-tab.jsx';
-import { createTexCompiler } from './tex-engine.mjs';
-import editorStyles from './editor.css';
-import previewStyles from './preview.css';
-import { amadeusKatexCss } from './markdown-preview.jsx';
-import { RenderedPreviewTab } from './rendered-preview-tab.jsx';
 import brandMark from '../assets/amadeus-brand-mark.png';
+import { installConnectionLatency } from './connection-latency.jsx';
 
 export const inject = ['slots', 'sidebarRight', 'sidebarRightTabs', 'conversation'];
 function AmadeusBrandMark({ size = 24, className }) {
@@ -22,7 +15,6 @@ function AmadeusBrandMark({ size = 24, className }) {
   return <span className={className} aria-hidden="true" style={{ display: 'block', width: size, height: size, flex: 'none', color: 'inherit', backgroundColor: 'currentColor', WebkitMask: mask, mask }} />;
 }
 function AmadeusBrandName() { return <span>Amadeus</span>; }
-function DirtyDot() { return <svg className="amadeus-dirty-dot" width="8" height="8" viewBox="0 0 8 8" aria-label="未保存"><circle cx="4" cy="4" r="3.5" fill="currentColor" /></svg>; }
 function installBrandFavicon() {
   let link = document.querySelector('link[rel~="icon"]');
   const created = !link;
@@ -338,7 +330,7 @@ function installSelection(ctx, store, activeSession) {
     const element = selection.anchorNode?.nodeType === 1 ? selection.anchorNode : selection.anchorNode?.parentElement;
     const endElement = selection.focusNode?.nodeType === 1 ? selection.focusNode : selection.focusNode?.parentElement;
     const editable = element?.closest('[contenteditable="true"]');
-    if (element?.closest('textarea,input,.amadeus-annotations') || (editable && !editable.closest('.cm-editor'))) return close();
+    if (element?.closest('textarea,input,.amadeus-annotations') || editable) return close();
     let source, sessionId;
     const file = element?.closest('[data-amadeus-path]');
     if (file) {
@@ -378,23 +370,9 @@ function installSelection(ctx, store, activeSession) {
   document.addEventListener('mouseup', detect); document.addEventListener('keyup', detect);
   return () => { document.removeEventListener('pointerdown', outsidePointerDown, true); document.removeEventListener('mouseup', detect); document.removeEventListener('keyup', detect); root.unmount(); host.remove(); };
 }
-function UnsavedClosePrompt({ request, onCancel, onClose }) {
-  const [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const saveAndClose = async () => {
-    setBusy(true); setError('');
-    try {
-      const result = await request.record.save();
-      if (result.kind !== 'saved') throw new Error('文件存在保存冲突，请先处理冲突后再关闭。');
-      onClose(false);
-    } catch (saveError) { setError(saveError.message); setBusy(false); }
-  };
-  return <Modal open title="保存对文件的修改？" closeLabel="关闭" onClose={() => !busy && onCancel()} className="amadeus-modal" footer={<div className="amadeus-modal-actions"><Button disabled={busy} onClick={onCancel}>取消</Button><Button disabled={busy} onClick={() => onClose(true)}>不保存</Button><Button variant="primary" disabled={busy} onClick={saveAndClose}>{busy ? '保存中…' : '保存并关闭'}</Button></div>}><p className="amadeus-modal-path">{request.path}</p>{error && <p className="amadeus-error" role="alert">{error}</p>}</Modal>;
-}
 export function apply(ctx) {
+  ctx.effect(() => ctx.slots.inject('settings.trigger', () => installConnectionLatency(ctx)));
   const store = createAnnotationStore(sessionStorage);
-  const documentStore = createDocumentStore();
-  const texCompiler = createTexCompiler();
-  const renderedPreviewId = 'dsh-amadeus-rendered-preview', renderedPreviewKind = 'amadeus-rendered-preview';
   // 0.1.6-alpha.2 removed the single "current" session; capture the session the
   // user is working in from the session-scoped surfaces this plugin renders.
   const activeSession = { id: undefined };
@@ -402,47 +380,6 @@ export function apply(ctx) {
     if (props.sessionId) activeSession.id = props.sessionId;
     return <Component {...props} />;
   };
-  const previewPanes = new Map();
-  const paneBeside = panelId => {
-    let targetPaneId = previewPanes.get(panelId);
-    if (!targetPaneId) targetPaneId = ctx.sidebarRight.split(panelId);
-    if (!targetPaneId) targetPaneId = panelId;
-    previewPanes.set(panelId, targetPaneId);
-    return targetPaneId;
-  };
-  const openPreviewBeside = ({ address, panelId }) => {
-    try {
-      paneBeside(panelId);
-      setTimeout(() => {
-        try {
-          ctx.sidebarRight.openTab(renderedPreviewKind, { paneId: previewPanes.get(panelId), params: { address } });
-        } catch {
-          // The remembered pane may have been closed by the user; split again.
-          const paneId = ctx.sidebarRight.split(panelId) || panelId;
-          previewPanes.set(panelId, paneId);
-          ctx.sidebarRight.openTab(renderedPreviewKind, { paneId, params: { address } });
-        }
-      }, 0);
-    } catch (err) {
-      console.error('[Amadeus] openPreviewBeside error:', err);
-    }
-  };
-  // LaTeX compile results are workspace artifacts now: write <stem>.pdf and let
-  // the native sidebar preview render it like any other PDF.
-  const onLatexCompiled = async ({ pdf, path, sessionId, panelId, beside }) => {
-    const pdfPath = path.replace(/\.tex$/i, '.pdf');
-    const response = await fetch(`/amadeus/files/artifact?${new URLSearchParams({ session: sessionId, path: pdfPath })}`, { method: 'PUT', headers: { 'Content-Type': 'application/pdf' }, body: pdf });
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || '保存编译产物失败');
-    ctx.sidebarRight.openResource(sessionFileAddress(sessionId, pdfPath), { paneId: beside ? paneBeside(panelId) : panelId });
-  };
-  const Editor = trackSession(props => <TextEditorTab {...props} documentStore={documentStore} texCompiler={texCompiler} onLatexCompiled={onLatexCompiled} onOpenPreviewBeside={openPreviewBeside} />);
-  const RenderedPreview = trackSession(props => <RenderedPreviewTab {...props} documentStore={documentStore} />);
-  const PreviewTitleContent = ({ address }) => {
-    const record = documentStore.open(address), snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
-    return <span className="amadeus-dirty-title">{snapshot.dirty && <DirtyDot />}<span>{sourcePath(address).split('/').pop()} · 预览</span></span>;
-  };
-  const PreviewTitle = props => { const address = props.useTabInfo().tab.navigation.params?.address; return address ? <PreviewTitleContent address={address} /> : '预览'; };
-  const editable = address => { try { return !!editorKind(sourcePath(address)); } catch { return false; } };
   const openAnnotation = annotation => {
     const source = annotation.source;
     if (source?.kind === 'conversation') { focusConversationSource(source, annotation.text); return; }
@@ -451,84 +388,26 @@ export function apply(ctx) {
     if (!sessionId) return;
     ctx.sidebarRight.openResource(sessionFileAddress(sessionId, source.path), { params: { amadeusAnnotation: { page: source.pageStart, text: annotation.text } } });
   };
-  const closeHost = document.createElement('div'), closeRoot = createRoot(closeHost), closeBypass = new Set();
-  document.body.append(closeHost);
-  const closeKey = (sessionId, tabId) => `${sessionId}\n${tabId}`;
-  const dismissClosePrompt = () => closeRoot.render(null);
-  const finishClose = (request, discard) => {
-    if (discard) request.record.discard();
-    closeBypass.add(closeKey(request.sessionId, request.tab.id));
-    dismissClosePrompt();
-    ctx.sidebarRight.closeIn(request.sessionId, request.tab.id);
-  };
-  ctx.effect(() => () => { closeRoot.unmount(); closeHost.remove(); });
   ctx.effect(installBrandFavicon);
-  ctx.effect(() => ctx.sidebarRight.registerCloseHandler('text', (sessionId, tab) => {
-    const key = closeKey(sessionId, tab.id);
-    if (closeBypass.delete(key) || !editable(tab.contentId)) return;
-    if (!documentStore.has(tab.contentId)) return;
-    const record = documentStore.open(tab.contentId);
-    if (!record.getSnapshot().dirty) return;
-    const request = { sessionId, tab, record, path: sourcePath(tab.contentId) };
-    closeRoot.render(<UnsavedClosePrompt request={request} onCancel={dismissClosePrompt} onClose={discard => finishClose(request, discard)} />);
-    const error = new Error('Unsaved changes require a close decision.');
-    error.name = 'AmadeusUnsavedClose';
-    throw error;
-  }));
+  ctx.effect(() => {
+    const selection = event => {
+      const detail = event.detail;
+      if (!detail?.sessionId || typeof detail.text !== 'string' || detail.source?.kind !== 'file') return;
+      try {
+        store.add(detail.sessionId, { text: detail.text, annotation: detail.annotation || '', source: detail.source });
+        activeSession.id = detail.sessionId;
+      } catch (error) { detail.error = error.message; }
+    };
+    window.addEventListener('amadeus:editor-selection', selection);
+    return () => window.removeEventListener('amadeus:editor-selection', selection);
+  });
   ctx.effect(() => ctx.slots.inject('sidebar.brand.mark', () => replaceBrandSlot(ctx, 'sidebar.brand.mark', AmadeusBrandMark)));
   ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
   ctx.effect(() => ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark' }, AmadeusBrandMark)));
   ctx.effect(() => replaceConversationHeadline());
   ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => delayQueueDock(ctx)));
   ctx.effect(() => ctx.slots.inject('conversation.chat.turnTail', () => suppressDesktopUnavailable(ctx)));
-  ctx.effect(() => () => { texCompiler.close(); documentStore.clear(); });
-  ctx.effect(() => ctx.sidebarRightTabs.register({ id: renderedPreviewId, kind: renderedPreviewKind, priority: 'extension', title: () => '预览' }));
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: renderedPreviewId }, RenderedPreview)));
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({ name: 'sidebar.right.pane.tab.title', key: renderedPreviewId }, PreviewTitle)));
-  // Take over editable documents from the native viewer; PDFs and Office files
-  // stay with the native sidebar preview (LibreOffice conversion + text layer).
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => {
-    let installed = false, dispose;
-    const install = () => {
-      if (installed) return;
-      const entry = ctx.slots.entries('sidebar.right.pane.tab').find(row => row.options.key === '@deepseek-ai/dsh-client-ui-sidebar-documentpreview');
-      if (!entry) return;
-      installed = true;
-      const Native = entry.component;
-      const Compatible = props => {
-        const { tab } = props.useTabInfo();
-        return editable(tab.contentId) ? <Editor {...props} /> : <Native {...props} />;
-      };
-      // Keep this native entry's exclusive child-slot declaration and injected
-      // render helpers; a second registration cannot redeclare that child.
-      entry.component = Compatible;
-      dispose = () => { if (entry.component === Compatible) entry.component = Native; };
-    };
-    install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.pane.tab', install);
-    return () => { unsubscribe(); dispose?.(); };
-  }));
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => {
-    let installed = false, dispose;
-    const install = () => {
-      if (installed) return;
-      const entry = ctx.slots.entries('sidebar.right.pane.tab.title').find(row => row.options.key === '@deepseek-ai/dsh-client-ui-sidebar-documentpreview');
-      if (!entry) return;
-      installed = true;
-      const Native = entry.component;
-      const EditableTitle = ({ address, ...props }) => {
-        const record = documentStore.open(address);
-        const snapshot = useSyncExternalStore(record.subscribe, record.getSnapshot);
-        const name = sourcePath(address).split('/').pop();
-        return <span className="amadeus-dirty-title">{snapshot.dirty && <DirtyDot />}{snapshot.previewing ? <span>{name} · 预览</span> : <Native {...props} />}</span>;
-      };
-      const DirtyTitle = props => { const { tab } = props.useTabInfo(); return editable(tab.contentId) ? <EditableTitle {...props} address={tab.contentId} /> : <Native {...props} />; };
-      entry.component = DirtyTitle;
-      dispose = () => { if (entry.component === DirtyTitle) entry.component = Native; };
-    };
-    install(); const unsubscribe = ctx.slots.subscribe('sidebar.right.pane.tab.title', install);
-    return () => { unsubscribe(); dispose?.(); };
-  }));
-  ctx.effect(() => { const style = document.createElement('style'); style.textContent = `${styles + themeStyles + editorStyles + previewStyles + amadeusKatexCss}\n/* Native sidebar PDF/Office text layer: the theme's hover-accent selection is nearly invisible; the lazy PDF chunk also inserts its CSS after ours, so win the tie with !important. */\n[data-pdf-text] ::selection{background:rgba(68,118,254,.45)!important}`; document.head.append(style); return () => style.remove(); });
+  ctx.effect(() => { const style = document.createElement('style'); style.textContent = `${styles + themeStyles}\n/* Native sidebar PDF/Office text layer: the theme's hover-accent selection is nearly invisible; the lazy PDF chunk also inserts its CSS after ours, so win the tie with !important. */\n[data-pdf-text] ::selection{background:rgba(68,118,254,.45)!important}`; document.head.append(style); return () => style.remove(); });
   // Add selection provenance around native document bodies (text, PDF, Office)
   // without replacing their rendering, and honor annotation page jumps.
   ctx.effect(() => ctx.slots.inject('sidebar.right.tab.document', () => {
