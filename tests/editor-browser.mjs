@@ -12,6 +12,8 @@ import {createRoot} from 'react-dom/client';
 import {EditorTab, apply} from './packages/editor/src/client.jsx';
 let closeHandler;
 window.testClosed = 0;
+window.testAnnotations = [];
+window.addEventListener('amadeus:editor-selection', event => { event.detail.handled = true; window.testAnnotations.push(event.detail); });
 window.testClose = () => {
   try { closeHandler('s1', {id: 'editor-tab'}); }
   catch (error) { if (error.name !== 'AmadeusEditorClosePending') throw error; }
@@ -19,6 +21,7 @@ window.testClose = () => {
 apply({
   effect: callback => callback(),
   sidebarRightTabs: {register() {}},
+  locale: {register: () => () => {}, getSnapshot: () => ({ active: 'zh' }), subscribe: () => () => {}},
   slots: {inject: (_name, callback) => callback(), register() {}},
   sidebarRight: {
     openResource() {}, openResourceIn() {},
@@ -37,9 +40,13 @@ function Harness() {
 createRoot(document.getElementById('root')).render(<Harness/>);`,
     resolveDir: process.cwd(), loader: 'jsx', sourcefile: 'editor-browser-harness.jsx',
   }, bundle: true, write: false, platform: 'browser', loader: { '.css': 'text' }, define: { 'process.env.NODE_ENV': '"development"' },
+  plugins: [{ name: 'stub-dsh-appearance-icons', setup(build) {
+    build.onResolve({ filter: /^@deepseek-ai\/dsh-client-ui-primitives$/ }, () => ({ path: 'appearance-icons', namespace: 'browser-test' }));
+    build.onLoad({ filter: /.*/, namespace: 'browser-test' }, () => ({ contents: 'export const IconLightOutline16 = () => null; export const IconDarkOutline16 = () => null; export const IconFollowsystemOutline16 = () => null;', loader: 'js' }));
+  } }],
 });
 const requests = [], loads = [];
-let dirty = false;
+let dirty = false, fontSize = 16, selectionText = 'Selected passage';
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   const json = body => { response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body)); };
@@ -57,7 +64,8 @@ const server = http.createServer(async (request, response) => {
       response.writeHead(404, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ error: 'File or directory not found' })); return;
     }
-    json(command.action === 'status' ? { dirty } : command.action === 'selection' ? {text: 'Selected passage', path: 'b.tex', lineStart: 1, lineEnd: 1} : { opened: true }); return;
+    if (command.action === 'fontSize') { if (command.size !== undefined) fontSize = command.size; json({ size: fontSize }); return; }
+    json(command.action === 'status' ? { dirty } : command.action === 'selection' ? {text: selectionText, path: 'b.tex', lineStart: 1, lineEnd: 1} : { opened: true }); return;
   }
   if (url.pathname === '/amadeus/code/') {
     loads.push(url.searchParams.get('instance'));
@@ -77,7 +85,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const base = `http://127.0.0.1:${server.address().port}`;
   await page.goto(`${base}/?initial`);
-  await expect(page.getByRole('button', { name: '选区加入对话', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /添加到对话/ })).toBeEnabled();
   await expect(page.locator('iframe')).toHaveCount(1);
   await expect.poll(() => loads.length).toBe(1);
   await expect.poll(() => requests.some(entry => entry.action === 'open' && entry.path === 'a.md')).toBe(true);
@@ -87,20 +95,29 @@ try {
   await page.locator('iframe').evaluate(element => { element.dataset.original = 'true'; });
   await page.evaluate(() => window.testNavigate('b.tex'));
   await expect.poll(() => requests.filter(entry => entry.action === 'open').at(-1)?.path).toBe('b.tex');
-  await expect(page.getByRole('button', { name: '选区加入对话', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /添加到对话/ })).toBeEnabled();
   assert.equal(await page.locator('iframe').getAttribute('src'), initialSource);
   assert.equal(await page.locator('iframe').getAttribute('data-original'), 'true');
   assert.equal(loads.length, 1, 'file switch must not reload the iframe');
   console.log('PASS: actual EditorTab switches files without remounting or reloading the fake iframe');
 
   await expect(page.locator('iframe')).toBeVisible();
+  await page.locator('iframe').contentFrame().locator('body').click();
+  await page.keyboard.press('Control+Equal');
+  await expect.poll(() => fontSize).toBe(17);
+  await page.keyboard.press('Control+0');
+  await expect.poll(() => fontSize).toBe(16);
+  assert.equal(await page.locator('iframe').evaluate(frame => frame.contentDocument.documentElement.style.zoom), '', 'keyboard shortcut changes code font only');
   await page.evaluate(() => window.testMount(false));
   await expect(page.locator('iframe')).toHaveCount(1);
   await expect(page.locator('iframe')).toBeHidden();
   assert.equal(await page.locator('iframe').evaluate(frame => frame.parentElement === document.body), true);
   await page.evaluate(() => window.testMount(true));
   await expect(page.locator('iframe')).toBeVisible();
-  await expect(page.getByRole('button', { name: '选区加入对话', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /添加到对话/ })).toBeEnabled();
+  const capsule = page.locator('.amadeus-code-selection-pill');
+  const capsuleBox = await capsule.boundingBox();
+  assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains('amadeus-code-selection-pill'), { x: capsuleBox.x + capsuleBox.width / 2, y: capsuleBox.y + capsuleBox.height / 2 }), true);
   assert.equal(await page.locator('iframe').getAttribute('data-original'), 'true');
   assert.equal(await page.locator('iframe').getAttribute('src'), initialSource);
   assert.equal(loads.length, 1, 'inactive body unmount/remount must keep existing browsing context');
@@ -136,46 +153,52 @@ try {
   await page.evaluate(() => history.replaceState(null, '', '/'));
   const beforeReload = requests.length;
   await page.reload();
-  await expect(page.getByRole('button', { name: '选区加入对话', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /添加到对话/ })).toBeEnabled();
   await expect.poll(() => loads.length).toBe(2);
   assert.equal(await page.evaluate(() => sessionStorage.getItem('amadeus.editor.browser')), browserId);
   assert.equal(await page.locator('iframe').getAttribute('src'), initialSource);
-  await expect.poll(() => requests.slice(beforeReload).some(entry => entry.action === 'open' && entry.path === 'b.tex' && entry.instance === instance)).toBe(true);
-  console.log('PASS: reload with undefined navigation params restores last file and workspace/browser identity');
+  assert.equal(requests.slice(beforeReload).some(entry => entry.action === 'open' && entry.instance === instance), false);
+  console.log('PASS: reload leaves file restoration to code-server');
 
   const seed = await page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage)));
   const duplicate = await context.newPage();
   duplicate.on('pageerror', error => errors.push(error.message));
   await duplicate.addInitScript(values => { if (window.top === window) for (const [key, value] of Object.entries(values)) sessionStorage.setItem(key, value); }, seed);
   await duplicate.goto(base);
-  await expect(duplicate.getByRole('button', { name: '选区加入对话', exact: true })).toBeEnabled();
+  await expect(duplicate.getByRole('button', { name: /添加到对话/ })).toBeEnabled();
   const duplicateId = await duplicate.evaluate(() => sessionStorage.getItem('amadeus.editor.browser'));
   assert.notEqual(duplicateId, browserId, 'concurrent duplicated storage must acquire a new Web Lock identity');
   assert.equal(await page.evaluate(() => sessionStorage.getItem('amadeus.editor.browser')), browserId);
   assert.notEqual(await duplicate.locator('iframe').getAttribute('src'), initialSource);
-  await expect.poll(() => requests.some(entry => entry.action === 'open' && entry.path === 'b.tex' && entry.instance === `editor-tab-${duplicateId}`)).toBe(true);
+  assert.equal(requests.some(entry => entry.action === 'open' && entry.instance === `editor-tab-${duplicateId}`), false);
   console.log('PASS: concurrent duplicated tab gets an independent bridge identity through browser Web Locks');
 
   await page.evaluate(() => window.testNavigate('deleted.tex'));
   await expect(page.getByRole('alert')).toContainText('File or directory not found');
-  await expect(page.getByRole('button', { name: '选区加入对话', exact: true })).toBeEnabled();
-  const selectionCount = requests.filter(entry => entry.action === 'selection' && entry.instance === instance).length;
-  await page.getByRole('button', { name: '选区加入对话', exact: true }).click();
-  await expect.poll(() => requests.filter(entry => entry.action === 'selection' && entry.instance === instance).length).toBe(selectionCount + 1);
+  await expect(page.getByRole('button', { name: /添加到对话/ })).toBeEnabled();
+  await page.getByRole('button', { name: /添加到对话/ }).hover();
+  selectionText = '';
+  await page.waitForTimeout(550);
+  await expect(page.getByRole('button', { name: /添加到对话/ })).toBeVisible();
+  await page.getByRole('button', { name: /添加到对话/ }).click();
+  await expect.poll(() => page.evaluate(() => window.testAnnotations.length)).toBe(1);
+  assert.equal(await page.evaluate(() => window.testAnnotations[0].text), 'Selected passage');
+  await page.waitForTimeout(550);
+  await expect(page.locator('.amadeus-code-selection-pill')).toHaveCount(0);
+  selectionText = 'Selected passage';
   await page.reload();
-  await expect(page.getByRole('alert')).toContainText('File or directory not found');
-  await expect(page.getByRole('button', { name: '选区加入对话', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: '选区加入对话', exact: true }).click();
-  await expect.poll(() => requests.filter(entry => entry.action === 'selection' && entry.instance === instance).length).toBe(selectionCount + 2);
+  await expect(page.getByRole('button', { name: /添加到对话/ })).toBeEnabled();
+  await page.getByRole('button', { name: /添加到对话/ }).click();
+  await expect.poll(() => page.evaluate(() => window.testAnnotations.length)).toBe(1);
   assert.deepEqual(errors, []);
-  console.log('PASS: missing file error, including restored file after reload, preserves working DSH selection');
+  console.log('PASS: missing file error, preserves working DSH selection');
 
   await page.evaluate(() => window.testNavigate('deleted.tex'));
   await expect(page.getByRole('alert')).toContainText('File or directory not found');
   const beforeRetryLoads = loads.length;
   await page.getByRole('button', { name: '重试连接', exact: true }).click();
   await expect.poll(() => loads.length).toBe(beforeRetryLoads + 1);
-  await expect(page.getByRole('button', { name: '选区加入对话', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /添加到对话/ })).toBeEnabled();
 
   let dialogCount = 0;
   let acceptClose = false;

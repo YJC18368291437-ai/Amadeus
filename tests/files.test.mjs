@@ -7,6 +7,17 @@ import { Readable } from 'node:stream';
 import { upload, zipDirectory } from '../packages/files/src/transfer.mjs';
 import { childWithin, resolveWithin, versionOf } from '../packages/files/src/workspace.mjs';
 import { inspectRemoval, removeConfirmed } from '../packages/files/src/remove.mjs';
+import { editableResource } from '../packages/files/src/editable-resource.mjs';
+
+test('editable file classification leaves DSH native resource routing intact', () => {
+  assert.equal(editableResource('dsh-resource://file/session/s1/.gitignore'), true);
+  assert.equal(editableResource('dsh-resource://file/session/s1/template.cls'), true);
+  assert.equal(editableResource('dsh-resource://file/session/s1/page.html'), true);
+  assert.equal(editableResource('dsh-resource://file/session/s1/notes.md'), true);
+  assert.equal(editableResource('dsh-resource://file/session/s1/paper.pdf'), false);
+  assert.equal(editableResource('dsh-resource://file/session/s1/../secret'), false);
+});
+
 async function workspace(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'amadeus-test-'));
   t.after(async () => { assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)); await rm(root, { recursive: true, force: true }); });

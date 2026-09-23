@@ -4,7 +4,7 @@ import { sessionRoot, json, routeErrors, HttpError } from '../../files/src/works
 import { prepareWorkspace, editorFile, bridgeCommand } from './workspace.mjs';
 
 export const inject = ['webServer', 'sessions'];
-const actions = new Set(['open', 'selection', 'status']);
+const actions = new Set(['open', 'selection', 'status', 'theme', 'fontSize']);
 
 export async function apply(ctx, config = {}) {
   const stateDir = path.resolve(config.stateDir || '.amadeus/editor');
@@ -40,6 +40,14 @@ export async function apply(ctx, config = {}) {
       input.path = await editorFile(root, command.path);
       if (typeof command.text === 'string') input.text = command.text.slice(0, 50000);
       if (Number.isSafeInteger(command.line) && command.line > 0) input.line = command.line;
+    }
+    if (input.action === 'theme') {
+      if (!['light', 'dark'].includes(command.theme)) throw new HttpError(400, 'Invalid editor theme');
+      input.theme = command.theme;
+    }
+    if (input.action === 'fontSize' && command.size !== undefined) {
+      if (!Number.isInteger(command.size) || command.size < 10 || command.size > 36) throw new HttpError(400, 'Invalid editor font size');
+      input.size = command.size;
     }
     json(res, 200, await bridgeCommand({ sessionId: bridgeId, root, bridgeDir, command: input }));
   }) }));

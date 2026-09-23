@@ -7,9 +7,11 @@ import themeStyles from '../../../ui/dsh-theme.css';
 import { reconcileAnnotationDraft, stripAnnotationDraftMarker } from './reader-state.mjs';
 import { parseEditableAddress } from './file-address.mjs';
 import brandMark from '../assets/amadeus-brand-mark.png';
+import { ConversationCollapse } from './conversation-collapse.jsx';
 import { installConnectionLatency } from './connection-latency.jsx';
+import { setAmadeusLocale, useAmadeusLocale, tr } from './locale.mjs';
 
-export const inject = ['slots', 'sidebarRight', 'sidebarRightTabs', 'conversation'];
+export const inject = ['slots', 'sidebarRight', 'sidebarRightTabs', 'conversation', 'locale'];
 function AmadeusBrandMark({ size = 24, className }) {
   const mask = `url("${brandMark}") center / contain no-repeat`;
   return <span className={className} aria-hidden="true" style={{ display: 'block', width: size, height: size, flex: 'none', color: 'inherit', backgroundColor: 'currentColor', WebkitMask: mask, mask }} />;
@@ -98,6 +100,7 @@ function sourcePath(address) {
 }
 const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
 function AnnotationChip({ annotations }) {
+  useAmadeusLocale();
   const anchor = useRef(), timer = useRef();
   const [expanded, setExpanded] = useState(false), [position, setPosition] = useState({});
   function reveal() {
@@ -108,19 +111,20 @@ function AnnotationChip({ annotations }) {
   }
   function leave() { timer.current = setTimeout(() => setExpanded(false), 80); }
   useEffect(() => () => clearTimeout(timer.current), []);
-  return <div className="amadeus-sent-summary"><button ref={anchor} className="amadeus-summary-chip amadeus-sent-chip" aria-label={`查看 ${annotations.length} 条已发送注释`} aria-expanded={expanded} onMouseEnter={reveal} onMouseLeave={leave} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{annotations.length} 条注释</button>
-    {expanded && <div className="amadeus-annotation-popover amadeus-sent-popover" style={position} role="region" aria-label="已发送注释详情" onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}><div className="amadeus-annotation-list">{annotations.map((item, index) => <article key={index} className="amadeus-hover-note"><span className="amadeus-note-number">{index + 1}。</span><div className="amadeus-note-copy"><span className="amadeus-note-label">所选文本：</span><blockquote>{denseText(item.text)}</blockquote><span className="amadeus-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div></div>}
+  return <div className="amadeus-sent-summary"><button ref={anchor} className="amadeus-summary-chip amadeus-sent-chip" aria-label={`${tr('查看', 'View')} ${annotations.length} ${tr('条已发送注释', 'sent annotations')}`} aria-expanded={expanded} onMouseEnter={reveal} onMouseLeave={leave} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{annotations.length} {tr('条注释', 'annotations')}</button>
+    {expanded && <div className="amadeus-annotation-popover amadeus-sent-popover" style={position} role="region" aria-label={tr('已发送注释详情', 'Sent annotation details')} onMouseEnter={() => clearTimeout(timer.current)} onMouseLeave={leave}><div className="amadeus-annotation-list">{annotations.map((item, index) => <article key={index} className="amadeus-hover-note"><span className="amadeus-note-number">{index + 1}。</span><div className="amadeus-note-copy"><span className="amadeus-note-label">{tr('所选文本：', 'Selected text:')}</span><blockquote>{denseText(item.text)}</blockquote><span className="amadeus-note-label">{tr('用户评论：', 'Comment:')}</span><p>{item.annotation || tr('（无）', '(none)')}</p></div></article>)}</div></div>}
   </div>;
 }
 function SentAnnotations({ node, renderMessageImages }) {
+  useAmadeusLocale();
   const { annotations, prompt } = node.data.amadeus;
   const attachments = node.data.content.filter(block => ['image', 'file'].includes(block.type) && block.attachment);
-  return <section className="amadeus-sent" aria-label="已发送的注释">
+  return <section className="amadeus-sent" aria-label={tr('已发送的注释', 'Sent annotations')}>
     <AnnotationChip annotations={annotations} />
     {(prompt || attachments.length > 0) && <div className="amadeus-sent-message">
     {prompt && <p style={{ whiteSpace: 'pre-wrap' }}>{prompt}</p>}
     {attachments.filter(b => b.type === 'image').map((b, index) => <React.Fragment key={index}>{renderMessageImages({ images: [{ attachment: b.attachment }], align: 'end', compact: true })}</React.Fragment>)}
-    {attachments.filter(b => b.type === 'file').map((b, index) => <span key={index}>附件：{b.attachment.name}</span>)}
+    {attachments.filter(b => b.type === 'file').map((b, index) => <span key={index}>{tr('附件：', 'Attachment: ')}{b.attachment.name}</span>)}
     </div>}
   </section>;
 }
@@ -130,10 +134,18 @@ function annotationEnvelope(node) {
   return parseAnnotatedPrompt(text);
 }
 function AssistantAnnotationPopover({ annotation, number, position, onEnter, onLeave }) {
-  return <div className="amadeus-annotation-popover amadeus-annotation-reference-popover" style={position} role="tooltip" onMouseEnter={onEnter} onMouseLeave={onLeave}><div className="amadeus-annotation-list"><article className="amadeus-hover-note"><span className="amadeus-note-number">{number}。</span><div className="amadeus-note-copy"><span className="amadeus-note-label">所选文本：</span><blockquote>{denseText(annotation.text)}</blockquote><span className="amadeus-note-label">用户评论：</span><p>{annotation.annotation || '（无）'}</p>{annotation.source?.kind === 'file' && <small className="amadeus-note-source">{annotation.source.path}{annotation.source.pageStart ? ` · 第 ${annotation.source.pageStart} 页` : ''}</small>}</div></article></div></div>;
+  useAmadeusLocale();
+  return <div className="amadeus-annotation-popover amadeus-annotation-reference-popover" style={position} role="tooltip" onMouseEnter={onEnter} onMouseLeave={onLeave}><div className="amadeus-annotation-list"><article className="amadeus-hover-note"><span className="amadeus-note-number">{number}。</span><div className="amadeus-note-copy"><span className="amadeus-note-label">{tr('所选文本：', 'Selected text:')}</span><blockquote>{denseText(annotation.text)}</blockquote><span className="amadeus-note-label">{tr('用户评论：', 'Comment:')}</span><p>{annotation.annotation || tr('（无）', '(none)')}</p>{annotation.source?.kind === 'file' && <small className="amadeus-note-source">{annotation.source.path}{annotation.source.pageStart ? ` · ${tr('第', 'page')} ${annotation.source.pageStart} ${tr('页', '')}` : ''}</small>}</div></article></div></div>;
 }
 function decorateAnnotationReferences(root, maximum) {
   if (!root || maximum < 1) return;
+  for (const button of root.querySelectorAll('[data-amadeus-annotation-ref]')) {
+    const number = button.dataset.amadeusAnnotationRef;
+    const label = `${tr('注释', 'Annotation')} ${number}`;
+    const accessible = `${tr('查看注释', 'View annotation')} ${number}`;
+    if (button.textContent !== label) button.textContent = label;
+    if (button.getAttribute('aria-label') !== accessible) button.setAttribute('aria-label', accessible);
+  }
   const doc = root.ownerDocument;
   const walker = doc.createTreeWalker(root, doc.defaultView.NodeFilter.SHOW_TEXT);
   const textNodes = [];
@@ -151,8 +163,8 @@ function decorateAnnotationReferences(root, maximum) {
       button.type = 'button';
       button.className = 'amadeus-annotation-reference';
       button.dataset.amadeusAnnotationRef = String(reference.number);
-      button.setAttribute('aria-label', `查看注释 ${reference.number}`);
-      button.textContent = `注释 ${reference.number}`;
+      button.setAttribute('aria-label', `${tr('查看注释', 'View annotation')} ${reference.number}`);
+      button.textContent = `${tr('注释', 'Annotation')} ${reference.number}`;
       fragment.append(button);
       offset = reference.end;
     }
@@ -161,6 +173,7 @@ function decorateAnnotationReferences(root, maximum) {
   }
 }
 function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
+  const language = useAmadeusLocale();
   const sourceNode = props.useChat(snapshot => {
     const keys = snapshot.locations.getTurn(props.node.data.turn);
     let matched;
@@ -203,7 +216,7 @@ function AssistantWithAnnotationLinks({ Native, openAnnotation, ...props }) {
     });
     observer.observe(element, { childList: true, characterData: true, subtree: true });
     return () => observer.disconnect();
-  }, [annotations.length, props.node]);
+  }, [annotations.length, props.node, language]);
   if (annotations.length === 0) return <Native {...props} />;
   return <div ref={root} className="amadeus-assistant-annotations" onMouseOver={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onMouseOut={event => { const anchor = reference(event.target); if (anchor && !anchor.contains(event.relatedTarget)) leave(); }} onFocus={event => { const anchor = reference(event.target); if (anchor) reveal(anchor); }} onBlur={event => { if (reference(event.target)) leave(); }} onClick={event => { const anchor = reference(event.target); if (!anchor) return; event.preventDefault(); const number = Number(anchor.dataset.amadeusAnnotationRef); const annotation = annotations[number - 1]; if (annotation) openAnnotation(annotation); }}><Native {...props} />{popover && <AssistantAnnotationPopover {...popover} onEnter={() => clearTimeout(hideTimer.current)} onLeave={leave} />}</div>;
 }
@@ -262,6 +275,7 @@ function sessionFileAddress(sessionId, path) {
   return `dsh-resource://file/session/${encodeURIComponent(sessionId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
 }
 function AnnotationDock({ sessionId, store, useInput, inputActions }) {
+  useAmadeusLocale();
   const items = useSyncExternalStore(store.subscribe, () => store.get(sessionId));
   const draft = useInput(state => state.draft), phase = useInput(state => state.phase);
   const [editing, setEditing] = useState(null), [comment, setComment] = useState('');
@@ -289,22 +303,23 @@ function AnnotationDock({ sessionId, store, useInput, inputActions }) {
     card.setAttribute('data-amadeus-annotation-input', '');
     return () => card.removeAttribute('data-amadeus-annotation-input');
   }, [items.length > 0]);
-  return <><div className="amadeus-annotations amadeus-annotation-summary" aria-label="待发送注释">{items.length > 0 && <>
-    <div className="amadeus-summary-pill" onMouseEnter={reveal} onMouseLeave={leave}><button ref={summary} className="amadeus-summary-chip" aria-label={`${items.length} 条注释`} aria-expanded={expanded} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{items.length} 条注释</button><button className="amadeus-clear-notes" aria-label="清除全部注释" title="清除全部注释" onClick={() => { store.clear(sessionId); setExpanded(false); }}>×</button></div>
-    {expanded && <div className="amadeus-annotation-popover" style={position} role="region" aria-label="全部注释" onMouseEnter={() => clearTimeout(hideTimer.current)} onMouseLeave={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}>
-      <div className="amadeus-annotation-list">{items.map((item, index) => <article key={item.id} className="amadeus-hover-note"><span className="amadeus-note-number">{index + 1}。</span><div className="amadeus-note-copy"><div className="amadeus-hover-note-title"><span>所选文本：</span><button className="amadeus-icon" aria-label={`编辑注释 ${index + 1}`} title="编辑" onClick={() => { setEditing(item.id); setComment(item.annotation); setExpanded(false); setPinned(false); }}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="m12.5 3.5 4 4M3 17l1-5L13.5 2.5a2.8 2.8 0 0 1 4 4L8 16Z"/></svg></button><button className="amadeus-icon" aria-label={`删除注释 ${index + 1}`} title="删除" onClick={() => store.remove(sessionId, item.id)}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12M8 8v6M12 8v6"/></svg></button></div><blockquote>{denseText(item.text)}</blockquote><span className="amadeus-note-label">用户评论：</span><p>{item.annotation || '（无）'}</p></div></article>)}</div>
+  return <><div className="amadeus-annotations amadeus-annotation-summary" aria-label={tr('待发送注释', 'Pending annotations')}>{items.length > 0 && <>
+    <div className="amadeus-summary-pill" onMouseEnter={reveal} onMouseLeave={leave}><button ref={summary} className="amadeus-summary-chip" aria-label={`${items.length} ${tr('条注释', 'annotations')}`} aria-expanded={expanded} onFocus={reveal} onBlur={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d="M5 3.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H8l-4.5 3V5A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 7h6M7 10h4"/></svg>{items.length} {tr('条注释', 'annotations')}</button><button className="amadeus-clear-notes" aria-label={tr('清除全部注释', 'Clear all annotations')} title={tr('清除全部注释', 'Clear all annotations')} onClick={() => { store.clear(sessionId); setExpanded(false); }}>×</button></div>
+    {expanded && <div className="amadeus-annotation-popover" style={position} role="region" aria-label={tr('全部注释', 'All annotations')} onMouseEnter={() => clearTimeout(hideTimer.current)} onMouseLeave={leave} onKeyDown={event => { if (event.key === 'Escape') setExpanded(false); }}>
+      <div className="amadeus-annotation-list">{items.map((item, index) => <article key={item.id} className="amadeus-hover-note"><span className="amadeus-note-number">{index + 1}。</span><div className="amadeus-note-copy"><div className="amadeus-hover-note-title"><span>{tr('所选文本：', 'Selected text:')}</span><button className="amadeus-icon" aria-label={`${tr('编辑注释', 'Edit annotation')} ${index + 1}`} title={tr('编辑', 'Edit')} onClick={() => { setEditing(item.id); setComment(item.annotation); setExpanded(false); }}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="m12.5 3.5 4 4M3 17l1-5L13.5 2.5a2.8 2.8 0 0 1 4 4L8 16Z"/></svg></button><button className="amadeus-icon" aria-label={`${tr('删除注释', 'Delete annotation')} ${index + 1}`} title={tr('删除', 'Delete')} onClick={() => store.remove(sessionId, item.id)}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M3 5h14M7 5V3h6v2M5 5l1 12h8l1-12M8 8v6M12 8v6"/></svg></button></div><blockquote>{denseText(item.text)}</blockquote><span className="amadeus-note-label">{tr('用户评论：', 'Comment:')}</span><p>{item.annotation || tr('（无）', '(none)')}</p></div></article>)}</div>
     </div>}
   </>}</div>
-  <Modal open={!!selected} title="编辑注释" closeLabel="关闭" onClose={() => setEditing(null)} className="amadeus-modal" footer={<div className="amadeus-modal-actions"><Button onClick={() => setEditing(null)}>取消</Button><Button variant="primary" onClick={() => { store.update(sessionId, editing, comment); setEditing(null); }}>保存</Button></div>}>{selected && <div className="amadeus-annotation-editor"><textarea autoFocus aria-label="修改注释的问题" value={comment} onChange={e => setComment(e.target.value)} /></div>}</Modal></>;
+  <Modal open={!!selected} title={tr('编辑注释', 'Edit annotation')} closeLabel={tr('关闭', 'Close')} onClose={() => setEditing(null)} className="amadeus-modal" footer={<div className="amadeus-modal-actions"><Button onClick={() => setEditing(null)}>{tr('取消', 'Cancel')}</Button><Button variant="primary" onClick={() => { store.update(sessionId, editing, comment); setEditing(null); }}>{tr('保存', 'Save')}</Button></div>}>{selected && <div className="amadeus-annotation-editor"><textarea autoFocus aria-label={tr('修改注释的问题', 'Edit annotation comment')} value={comment} onChange={e => setComment(e.target.value)} /></div>}</Modal></>;
 }
-function SelectionPopup({ selection, onSave, onClose }) {
-  const [editing, setEditing] = useState(false), [annotation, setAnnotation] = useState(''), [error, setError] = useState('');
+function SelectionPopup({ selection, onSave, onClose, initialEditing = false }) {
+  useAmadeusLocale();
+  const [editing, setEditing] = useState(initialEditing), [annotation, setAnnotation] = useState(''), [error, setError] = useState('');
   function save() {
     try { onSave({ text: selection.text, source: selection.source, annotation }); }
     catch (error) { setError(error.message); }
   }
-  return <div className={`amadeus-selection ${editing ? 'amadeus-selection-editor' : 'amadeus-selection-prompt'}`} style={{ left: Math.max(8, Math.min(selection.x, innerWidth - (editing ? 308 : 126))), top: Math.max(8, Math.min(selection.y + 6, innerHeight - (editing ? 50 : 38))) }} role={editing ? 'dialog' : undefined} aria-label="添加到对话" onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
-    {!editing ? <button className="amadeus-selection-trigger" onMouseDown={e => e.preventDefault()} onClick={() => setEditing(true)}><span aria-hidden="true">＋</span> 添加到对话</button> : <><input autoFocus type="text" aria-label="针对选中文本的问题" placeholder="添加可选评论…" value={annotation} onChange={e => setAnnotation(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); save(); } }} /><button type="button" className="amadeus-selection-confirm" aria-label="添加注释" title="添加注释" onClick={save}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4.5 10 3.5 4 7.5-9" /></svg></button>{error && <p role="alert">{error}</p>}</>}
+  return <div className={`amadeus-selection ${editing ? 'amadeus-selection-editor' : 'amadeus-selection-prompt'}`} style={{ left: Math.max(8, Math.min(selection.x, innerWidth - (editing ? 308 : 126))), top: Math.max(8, Math.min(selection.y + 6, innerHeight - (editing ? 50 : 38))) }} role={editing ? 'dialog' : undefined} aria-label={tr('添加到对话', 'Add to chat')} onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
+    {!editing ? <button className="amadeus-selection-trigger" onMouseDown={e => e.preventDefault()} onClick={() => setEditing(true)}><span aria-hidden="true">＋</span> {tr('添加到对话', 'Add to chat')}</button> : <><input autoFocus type="text" aria-label={tr('针对选中文本的问题', 'Question about selected text')} placeholder={tr('添加可选评论…', 'Add an optional comment…')} value={annotation} onChange={e => setAnnotation(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); save(); } }} /><button type="button" className="amadeus-selection-confirm" aria-label={tr('添加注释', 'Add annotation')} title={tr('添加注释', 'Add annotation')} onClick={save}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4.5 10 3.5 4 7.5-9" /></svg></button>{error && <p role="alert">{error}</p>}</>}
   </div>;
 }
 function installSelection(ctx, store, activeSession) {
@@ -313,6 +328,15 @@ function installSelection(ctx, store, activeSession) {
   let locked = false, skipMouseUp = false;
   function close() { locked = false; root.render(null); }
   function cancel() { close(); window.getSelection()?.removeAllRanges(); }
+  function fromEditor(event) {
+    const detail = event.detail;
+    if (!detail?.sessionId || !detail.text?.trim() || detail.source?.kind !== 'file') return;
+    detail.handled = true;
+    activeSession.id = detail.sessionId;
+    locked = true;
+    const sessionId = detail.sessionId;
+    root.render(<SelectionPopup key={`${sessionId}:${detail.text}:editor`} initialEditing selection={{ text: detail.text, source: detail.source, x: detail.x, y: detail.y }} onClose={cancel} onSave={item => { store.add(sessionId, item); close(); }} />);
+  }
   function outsidePointerDown(event) {
     skipMouseUp = false;
     if (host.contains(event.target)) { locked = true; return; }
@@ -368,9 +392,11 @@ function installSelection(ctx, store, activeSession) {
   }
   document.addEventListener('pointerdown', outsidePointerDown, true);
   document.addEventListener('mouseup', detect); document.addEventListener('keyup', detect);
-  return () => { document.removeEventListener('pointerdown', outsidePointerDown, true); document.removeEventListener('mouseup', detect); document.removeEventListener('keyup', detect); root.unmount(); host.remove(); };
+  window.addEventListener('amadeus:editor-selection', fromEditor);
+  return () => { document.removeEventListener('pointerdown', outsidePointerDown, true); document.removeEventListener('mouseup', detect); document.removeEventListener('keyup', detect); window.removeEventListener('amadeus:editor-selection', fromEditor); root.unmount(); host.remove(); };
 }
 export function apply(ctx) {
+  setAmadeusLocale(ctx.locale);
   ctx.effect(() => ctx.slots.inject('settings.trigger', () => installConnectionLatency(ctx)));
   const store = createAnnotationStore(sessionStorage);
   // 0.1.6-alpha.2 removed the single "current" session; capture the session the
@@ -389,20 +415,9 @@ export function apply(ctx) {
     ctx.sidebarRight.openResource(sessionFileAddress(sessionId, source.path), { params: { amadeusAnnotation: { page: source.pageStart, text: annotation.text } } });
   };
   ctx.effect(installBrandFavicon);
-  ctx.effect(() => {
-    const selection = event => {
-      const detail = event.detail;
-      if (!detail?.sessionId || typeof detail.text !== 'string' || detail.source?.kind !== 'file') return;
-      try {
-        store.add(detail.sessionId, { text: detail.text, annotation: detail.annotation || '', source: detail.source });
-        activeSession.id = detail.sessionId;
-      } catch (error) { detail.error = error.message; }
-    };
-    window.addEventListener('amadeus:editor-selection', selection);
-    return () => window.removeEventListener('amadeus:editor-selection', selection);
-  });
   ctx.effect(() => ctx.slots.inject('sidebar.brand.mark', () => replaceBrandSlot(ctx, 'sidebar.brand.mark', AmadeusBrandMark)));
   ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
+  ctx.effect(() => ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'amadeus-conversation-collapse', order: 10 }, props => <ConversationCollapse {...props} sidebarRight={ctx.sidebarRight} />)));
   ctx.effect(() => ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({ name: 'conversation.hero.brand.mark' }, AmadeusBrandMark)));
   ctx.effect(() => replaceConversationHeadline());
   ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => delayQueueDock(ctx)));

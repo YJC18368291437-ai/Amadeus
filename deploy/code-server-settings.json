@@ -6,6 +6,8 @@
   "workbench.activityBar.location": "hidden",
   "workbench.statusBar.visible": true,
   "workbench.editor.enablePreview": false,
+  "workbench.editor.tabSizing": "shrink",
+  "workbench.editor.tabActionCloseVisibility": "active",
   "workbench.secondarySideBar.defaultVisibility": "hidden",
   "editor.minimap.enabled": false,
   "editor.fontSize": 16,

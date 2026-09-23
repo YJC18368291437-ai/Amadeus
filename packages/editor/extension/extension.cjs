@@ -50,6 +50,19 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
         return { opened: true };
       }
       case 'status': return { dirty: vscode.workspace.textDocuments.some(document => document.isDirty) };
+      case 'theme': {
+        if (!['light', 'dark'].includes(body.theme)) throw failure('Invalid editor theme.');
+        await vscode.workspace.getConfiguration('workbench').update('colorTheme', body.theme === 'dark' ? 'Default Dark+' : 'Default Light+', vscode.ConfigurationTarget.Global);
+        return { changed: true };
+      }
+      case 'fontSize': {
+        const setting = vscode.workspace.getConfiguration('editor');
+        if (body.size !== undefined) {
+          if (!Number.isInteger(body.size) || body.size < 10 || body.size > 36) throw failure('Invalid editor font size.');
+          await setting.update('fontSize', body.size, vscode.ConfigurationTarget.Global);
+        }
+        return { size: setting.get('fontSize') };
+      }
       case 'selection': {
         const current = await editor();
         const text = current.document.getText(current.selection);

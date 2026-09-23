@@ -15,16 +15,18 @@ test('editor bridge authenticates, confines files, and exposes only editor actio
   await fs.writeFile(file, 'hello');
   await fs.writeFile(outside, 'secret');
   const calls = [];
+  const settings = { workbench: { colorTheme: 'Default Light+' }, editor: { fontSize: 16 } };
   const document = { uri: { scheme: 'file', fsPath: file }, lineCount: 1, getText: () => 'hello', positionAt: character => ({ line: 0, character }) };
   const current = { document, selection: { start: { line: 0 }, end: { line: 0 } }, revealRange() {} };
   const vscode = {
-    workspace: { getConfiguration: () => ({ get: () => 'a'.repeat(64) }), workspaceFolders: [{ uri: { fsPath: workspace } }], textDocuments: [{ isDirty: true }], openTextDocument: async () => document },
+    workspace: { getConfiguration: section => section === 'amadeus' ? { get: () => 'a'.repeat(64) } : { get: key => settings[section]?.[key], update: async (key, value) => { settings[section][key] = value; } }, workspaceFolders: [{ uri: { fsPath: workspace } }], textDocuments: [{ isDirty: true }], openTextDocument: async () => document },
     window: { activeTextEditor: current, showTextDocument: async () => current, showErrorMessage() {} },
     commands: { executeCommand: async command => calls.push(command) },
     Uri: { file: fsPath => ({ fsPath }) },
     Position: class { constructor(line, character) { this.line = line; this.character = character; } },
     Selection: class { constructor(start, end) { this.start = start; this.end = end; } },
-    Range: class { constructor(start, end) { this.start = start; this.end = end; } }
+    Range: class { constructor(start, end) { this.start = start; this.end = end; } },
+    ConfigurationTarget: { Global: 1 },
   };
   const bridge = await bridgeModule.createBridge(vscode, directory);
   t.after(async () => { await bridge.dispose(); await fs.rm(temporary, { recursive: true, force: true }); });
@@ -40,6 +42,13 @@ test('editor bridge authenticates, confines files, and exposes only editor actio
   assert.equal(current.selection.start.character, 1);
   assert.equal(current.selection.end.character, 4);
   assert.deepEqual(await (await invoke({ action: 'selection' })).json(), { text: 'hello', path: 'paper.tex', lineStart: 1, lineEnd: 1 });
+  assert.equal((await invoke({ action: 'theme', theme: 'dark' })).status, 200);
+  assert.equal(settings.workbench.colorTheme, 'Default Dark+');
+  assert.equal((await invoke({ action: 'theme', theme: 'invalid' })).status, 400);
+  assert.deepEqual(await (await invoke({ action: 'fontSize' })).json(), { size: 16 });
+  assert.deepEqual(await (await invoke({ action: 'fontSize', size: 18 })).json(), { size: 18 });
+  assert.equal(settings.editor.fontSize, 18);
+  assert.equal((await invoke({ action: 'fontSize', size: 100 })).status, 400);
   assert.equal((await invoke({ action: 'executeCommand', command: 'terminal.new' })).status, 400);
   for (const action of ['save', 'undo', 'redo', 'markdown-preview', 'latex-build', 'latex-preview']) {
     assert.equal((await invoke({ action })).status, 400);

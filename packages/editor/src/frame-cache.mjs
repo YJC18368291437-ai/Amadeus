@@ -2,7 +2,7 @@
 // until its TAB RECORD closes, otherwise switching to the file tree reloads VS Code.
 const frames = new Map();
 
-export function attachWorkbench({ key, url, placeholder, signal, visible = true, revision = 0, onDispose }) {
+export function attachWorkbench({ key, url, placeholder, signal, visible = true, revision = 0, onLoad, onDispose }) {
   let entry = frames.get(key);
   if (entry && (entry.url !== url || revision > entry.revision)) { entry.dispose(); entry = undefined; }
   if (!entry) {
@@ -11,15 +11,18 @@ export function attachWorkbench({ key, url, placeholder, signal, visible = true,
     frame.allow = 'clipboard-read; clipboard-write';
     Object.assign(frame.style, { position: 'fixed', display: 'none', zIndex: '10', border: '0' });
     document.body.append(frame);
+    frame.addEventListener('load', () => { entry.loaded = true; entry.onLoad?.(); }, { once: true });
     const dispose = () => {
       frame.remove(); frames.delete(key); onDispose?.(); signal?.removeEventListener('abort', dispose);
     };
-    entry = { frame, url, revision, dispose };
+    entry = { frame, url, revision, loaded: false, onLoad, dispose };
     frames.set(key, entry);
     signal?.addEventListener('abort', dispose, { once: true });
     if (signal?.aborted) dispose();
   }
   const { frame } = entry;
+  entry.onLoad = onLoad;
+  if (entry.loaded) onLoad?.();
   const measure = () => {
     const rect = placeholder.getBoundingClientRect();
     const shown = visible && placeholder.isConnected && rect.width > 0 && rect.height > 0;
@@ -49,3 +52,4 @@ export function attachWorkbench({ key, url, placeholder, signal, visible = true,
 }
 
 export function disposeWorkbenches() { for (const entry of [...frames.values()]) entry.dispose(); }
+export function getWorkbenchFrame(key) { return frames.get(key)?.frame; }
