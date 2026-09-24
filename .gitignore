@@ -12,3 +12,6 @@ playwright-report/
 workspace/
 amadeus-workspace/
 tmp/
+/bci-venv/
+/vnc/
+/jupyter/

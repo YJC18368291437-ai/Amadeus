@@ -1,0 +1,8 @@
+{
+  "name": "dsh-amadeus-study-title",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Model-facing tool that pins an Amadeus conversation title (used by the study-coach preset).",
+  "main": "dist/index.mjs"
+}

@@ -1,0 +1,32 @@
+{
+  "name": "dsh-amadeus-progress",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "学习面板：右侧栏固定标签（学习进度 + token 花费 + 一键操作）。",
+  "main": "dist/index.mjs",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  }
+}

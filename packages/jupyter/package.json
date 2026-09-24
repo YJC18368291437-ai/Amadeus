@@ -1,0 +1,32 @@
+{
+  "name": "dsh-amadeus-jupyter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Right-sidebar JupyterLab tab for the Amadeus workspace.",
+  "main": "dist/index.mjs",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  }
+}

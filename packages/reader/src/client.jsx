@@ -62,7 +62,7 @@ function delayQueueDock(ctx) {
     if (!candidate) return;
     entry = candidate; Native = candidate.component;
     Delayed = props => {
-      const active = props.useSession(state => state.queue.some(item => item.placement === 'queued') || state.pendingSubmissions.some(item => item.placement === 'queued'));
+      const active = props.useSession(state => (state.queue ?? []).some(item => item.placement === 'queued') || (state.pendingSubmissions ?? []).some(item => item.placement === 'queued'));
       const [visible, setVisible] = useState(false);
       useEffect(() => {
         if (!active) { setVisible(false); return; }

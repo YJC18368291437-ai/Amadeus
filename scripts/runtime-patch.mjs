@@ -84,6 +84,9 @@ export function createRuntimePatch({ root, home, config }) {
     { id: 'amadeus-files', name: plugin('files'), config: { maxUploadBytes: config.maxUploadBytes ?? 1024 ** 3, workspace: path.resolve(config.workspace || root) } },
     { id: 'amadeus-reader', name: plugin('reader') },
     { id: 'amadeus-editor', name: plugin('editor'), config: { stateDir: path.join(home, 'editor'), upstream: config.editor?.upstream || 'http://127.0.0.1:8080', bridgeDir: config.editor?.bridgeDir || process.env.AMADEUS_EDITOR_BRIDGE_DIR || path.join(home, 'editor/bridge') } },
+    { id: 'amadeus-study-title', name: plugin('study-title') },
+    { id: 'amadeus-jupyter', name: plugin('jupyter'), config: { url: config.jupyterUrl } },
+    { id: 'amadeus-progress', name: plugin('progress'), config: { jupyterUrl: config.jupyterUrl } },
   ];
   const playwrightMcpPlugin = resolvePlaywrightMcpPlugin({ root, home, config });
   if (playwrightMcpPlugin) inserts.push(playwrightMcpPlugin);
