@@ -4,6 +4,7 @@
 
 - 将 DSH 从 `0.1.6-alpha.2` 升级到 `0.1.7-rc.1`，并同步更新 Cordis、Schemastery 和 Login 插件的 WebServer 依赖。该 DSH 版本仍是预发布候选版。
 - 接入 DSH 的侧栏终端恢复、会话归档管理、文件改动审阅和扩展 Office/CSV/TSV 预览功能。
+- 在 Web profile 中启用 DSH 的隔离网页浏览器，可从右侧侧栏打开 HTTP(S) 页面。
 
 ## 1.1.0 — 2026-09-24（正式版）
 

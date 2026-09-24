@@ -90,6 +90,7 @@ export function createRuntimePatch({ root, home, config }) {
 
   return [
     { id: 'webserver', disabled: true },
+    { id: 'ui-sidebar-browser', disabled: false },
     { id: 'workspace-files', name: '@deepseek-ai/dsh-api-workspace-files', config: { maxFileBytes: maxPreviewBytes } },
     { id: 'typert-gateway', name: '@deepseek-ai/dsh-api-gateway', config: { websocketHeartbeatIntervalMs: WEBSOCKET_HEARTBEAT_INTERVAL_MS } },
     { insert: inserts },

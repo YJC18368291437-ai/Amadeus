@@ -13,6 +13,7 @@ Amadeus 是面向单用户的 [DeepSeek Harness（DSH）](https://github.com/dee
 | LaTeX | 镜像内含 TeX Live、XeLaTeX、latexmk、Biber、中文字体和 LaTeX Workshop |
 | 选区注释 | 选中对话、原生文档或编辑器文本，填写可选评论后点蓝色对勾；回答里的注释引用可定位原文 |
 | 工作区 | 上传文件或文件夹、下载 ZIP、处理重名与删除确认；工作区文件保存在宿主机目录 |
+| 网页浏览器 | 在右侧侧栏打开隔离的 HTTP(S) 网页，与当前工作区并排浏览 |
 | 外观 | DSH 与编辑器可分别选择浅色、深色或跟随系统；侧栏可收起中间对话 |
 
 ## Docker Compose 部署
