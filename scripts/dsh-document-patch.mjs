@@ -16,16 +16,23 @@ export function patchComposerIme(source) {
 }
 
 export function patchPdfControls(source, controls) {
+  const component = controls.slice(controls.indexOf('export function')).replace('export function', 'function').trimEnd();
   if (source.includes('/* amadeus-pdf-controls */')) {
     const start = source.indexOf('function createPdfControls(React) {');
     const end = source.indexOf('\nconst AmadeusPdfControls = createPdfControls(react);', start);
     if (start < 0 || end < 0) throw new Error('Unsupported DSH document build: missing PDF controls boundary');
-    const component = controls.slice(controls.indexOf('export function')).replace('export function', 'function').trimEnd();
     return source.slice(0, start) + component + source.slice(end);
   }
-  let result = replaceOnce(source, 'function PdfBody(props) {', `${controls.replace('export function', 'function').trimEnd()}\nconst AmadeusPdfControls = createPdfControls(react);\nfunction PdfBody(props) {`);
-  result = replaceOnce(result, 'return (0, react_jsx_runtime.jsx)("section", {\n\t\t\t\tclassName: PdfBody_module_css_default.body,', 'return (0, react_jsx_runtime.jsx)(AmadeusPdfControls, { document: load.document, children: (0, react_jsx_runtime.jsx)("section", {\n\t\t\t\tclassName: PdfBody_module_css_default.body,');
-  result = replaceOnce(result, '}, index))\n\t\t\t});', '}, index))\n\t\t\t}) });');
+  let result = replaceOnce(source, 'function PdfBody(props) {', `${component}\nconst AmadeusPdfControls = createPdfControls(react);\nfunction PdfBody(props) {`);
+  const modernViewport = 'return (0, react_jsx_runtime.jsx)(ZoomViewport, {';
+  if (result.includes(modernViewport)) {
+    result = replaceOnce(result, modernViewport, 'return (0, react_jsx_runtime.jsx)(AmadeusPdfControls, { document: load.document, page: view.page ?? 1, preference, zoom: renderZoom, onPreference: setPreference, onPage: page => actions.page(tab.id, page), children: (0, react_jsx_runtime.jsx)(ZoomViewport, {');
+    result = replaceOnce(result, 'scrollportRef: props.scrollportRef,', 'scrollportRef: node => { if (node !== null) node.setAttribute("data-amadeus-pdf-scroll", "true"); props.scrollportRef(node); },');
+    result = replaceOnce(result, 'children: pages\n\t\t\t});', 'children: pages\n\t\t\t}) });');
+  } else {
+    result = replaceOnce(result, 'return (0, react_jsx_runtime.jsx)("section", {\n\t\t\t\tclassName: PdfBody_module_css_default.body,', 'return (0, react_jsx_runtime.jsx)(AmadeusPdfControls, { document: load.document, children: (0, react_jsx_runtime.jsx)("section", {\n\t\t\t\tclassName: PdfBody_module_css_default.body,');
+    result = replaceOnce(result, '}, index))\n\t\t\t});', '}, index))\n\t\t\t}) });');
+  }
   // CSS zoom already scales the overlay; use its unzoomed layout width.
   result = replaceOnce(result, 'host.getBoundingClientRect().width / viewport.width', 'host.clientWidth / viewport.width');
   return `${result}\n/* amadeus-pdf-controls */\n`;
