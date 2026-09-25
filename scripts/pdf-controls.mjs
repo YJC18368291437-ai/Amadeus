@@ -109,7 +109,7 @@ export function createPdfControls(React) {
       h('style', null, '[data-amadeus-pdf-controls] [data-document-zoom-controls]{display:none!important}'),
       h('div', { role: 'toolbar', 'aria-label': 'PDF 预览控制', style: { display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 4, padding: '4px 6px', flexShrink: 0, borderBottom: '1px solid #8883', background: 'var(--dsw-alias-bg-base, white)' } },
         button('缩小', '−', () => changeZoom(-.1), scale <= .25),
-        button('重置缩放', preference.kind === 'fit-width' ? '适应宽度' : `${Math.round(scale * 100)}%`, () => onPreference(initialPreference.current)),
+        preference.kind !== 'fit-width' && button('重置缩放', `${Math.round(scale * 100)}%`, () => onPreference(initialPreference.current)),
         button('放大', '+', () => changeZoom(.1), scale >= 4),
         button('适应侧边栏宽度', '适应宽度', () => onPreference({ kind: 'fit-width' }), false, preference.kind === 'fit-width'),
         button('上一页', '‹', () => jump(currentPage - 1), currentPage <= 1),
