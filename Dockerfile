@@ -34,6 +34,7 @@ COPY --chown=node:node . .
 RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
     npm ci && npm run build \
+    && node scripts/patch-code-server.mjs /opt/code-server \
     && node scripts/patch-latex-workshop.mjs /opt/amadeus-extensions/james-yu.latex-workshop-${LATEX_WORKSHOP_VERSION} \
     && node node_modules/playwright/cli.js install-deps chromium \
     && rm -rf /var/lib/apt/lists/* \

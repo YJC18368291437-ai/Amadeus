@@ -9,6 +9,22 @@ export const LATEX_WORKSHOP_VIEWER_FILES = Object.freeze({
   'viewer/viewer.mjs': { cmaps: 1, standard_fonts: 1 },
 });
 
+const EMBEDDED_PDF_PRINT_GUARD = `if (window.parent !== window) {
+      return;
+    }`;
+const EMBEDDED_PDF_PRINT_BLOCK = `if (window.parent !== window) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }`;
+
+function patchEmbeddedPdfPrintShortcut(file, source) {
+  if (file !== 'viewer/viewer.mjs' || source.includes(EMBEDDED_PDF_PRINT_BLOCK)) return source;
+  const matches = source.split(EMBEDDED_PDF_PRINT_GUARD).length - 1;
+  if (matches !== 1) throw new Error(`Unsupported LaTeX Workshop PDF print handler: expected one embedded-viewer guard, found ${matches}`);
+  return source.replace(EMBEDDED_PDF_PRINT_GUARD, EMBEDDED_PDF_PRINT_BLOCK);
+}
+
 /** PDF.js assets must stay beneath code-server's dynamic /proxy/<port>/ URL. */
 export function patchViewerSource(file, source) {
   const expected = LATEX_WORKSHOP_VIEWER_FILES[file];
@@ -26,7 +42,11 @@ export function patchViewerSource(file, source) {
     // Do not match the './asset/' literal inside our existing expression.
     result = result.split(absolute).map(part => part.replace(pattern, absolute)).join(absolute);
   }
-  return result;
+  // PDF.js deliberately lets Ctrl/Cmd+P escape from embedded viewers. The
+  // viewer lives in code-server's nested webview, so the outer Amadeus iframe
+  // cannot cancel that shortcut. Cancel it here while keeping the viewer's
+  // explicit Print button available.
+  return patchEmbeddedPdfPrintShortcut(file, result);
 }
 
 export async function patchLatexWorkshop(directory) {

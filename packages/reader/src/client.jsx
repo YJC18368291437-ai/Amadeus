@@ -325,7 +325,7 @@ function SelectionPopup({ selection, onSave, onClose, initialEditing = false }) 
 function installSelection(ctx, store, activeSession) {
   const host = document.createElement('div'); document.body.append(host);
   const root = createRoot(host);
-  let locked = false, skipMouseUp = false;
+  let locked = false, skipMouseUp = false, pointerSelecting = false, selectionTimer;
   function close() { locked = false; root.render(null); }
   function cancel() { close(); window.getSelection()?.removeAllRanges(); }
   function fromEditor(event) {
@@ -338,13 +338,15 @@ function installSelection(ctx, store, activeSession) {
     root.render(<SelectionPopup key={`${sessionId}:${detail.text}:editor`} initialEditing selection={{ text: detail.text, source: detail.source, x: detail.x, y: detail.y }} onClose={cancel} onSave={item => { store.add(sessionId, item); close(); }} />);
   }
   function outsidePointerDown(event) {
+    pointerSelecting = true;
     skipMouseUp = false;
     if (host.contains(event.target)) { locked = true; return; }
     if (locked) { cancel(); skipMouseUp = true; }
   }
   function detect(event) {
-    if (event.type === 'mouseup' && skipMouseUp) { skipMouseUp = false; return; }
-    if (host.contains(event.target)) { locked = true; return; }
+    if (event?.type === 'pointerup' || event?.type === 'touchend' || event?.type === 'mouseup' || event?.type === 'keyup') clearTimeout(selectionTimer);
+    if (event?.type === 'mouseup' && skipMouseUp) { skipMouseUp = false; return; }
+    if (event?.target && host.contains(event.target)) { locked = true; return; }
     if (locked) return;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.rangeCount) return close();
@@ -390,10 +392,26 @@ function installSelection(ctx, store, activeSession) {
     const rect = range.getBoundingClientRect();
     root.render(<SelectionPopup key={`${sessionId}:${text}`} selection={{ text, source, x: Math.max(8, rect.left), y: rect.bottom }} onClose={cancel} onSave={item => { store.add(sessionId, item); close(); window.getSelection()?.removeAllRanges(); }} />);
   }
+  function scheduleDetect() {
+    clearTimeout(selectionTimer);
+    selectionTimer = setTimeout(() => { if (!pointerSelecting) detect(); }, 140);
+  }
+  function finishPointerSelection(event) { pointerSelecting = false; detect(event); }
+  function cancelPointerSelection() { pointerSelecting = false; }
   document.addEventListener('pointerdown', outsidePointerDown, true);
-  document.addEventListener('mouseup', detect); document.addEventListener('keyup', detect);
+  document.addEventListener('touchstart', outsidePointerDown, { capture: true, passive: true });
+  // PDF text layers and touch selection handles emit pointer/selection events;
+  // mouseup alone misses those paths on tablet browsers. Keep mouseup and
+  // keyup for browsers and keyboard-driven selections that do not use pointerup.
+  document.addEventListener('pointerup', finishPointerSelection);
+  document.addEventListener('touchend', finishPointerSelection);
+  document.addEventListener('pointercancel', cancelPointerSelection);
+  document.addEventListener('touchcancel', cancelPointerSelection);
+  document.addEventListener('mouseup', detect);
+  document.addEventListener('keyup', detect);
+  document.addEventListener('selectionchange', scheduleDetect);
   window.addEventListener('amadeus:editor-selection', fromEditor);
-  return () => { document.removeEventListener('pointerdown', outsidePointerDown, true); document.removeEventListener('mouseup', detect); document.removeEventListener('keyup', detect); window.removeEventListener('amadeus:editor-selection', fromEditor); root.unmount(); host.remove(); };
+  return () => { clearTimeout(selectionTimer); document.removeEventListener('pointerdown', outsidePointerDown, true); document.removeEventListener('touchstart', outsidePointerDown, true); document.removeEventListener('pointerup', finishPointerSelection); document.removeEventListener('touchend', finishPointerSelection); document.removeEventListener('pointercancel', cancelPointerSelection); document.removeEventListener('touchcancel', cancelPointerSelection); document.removeEventListener('mouseup', detect); document.removeEventListener('keyup', detect); document.removeEventListener('selectionchange', scheduleDetect); window.removeEventListener('amadeus:editor-selection', fromEditor); root.unmount(); host.remove(); };
 }
 export function apply(ctx) {
   setAmadeusLocale(ctx.locale);

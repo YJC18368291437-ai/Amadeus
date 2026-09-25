@@ -26,11 +26,31 @@ export async function editorFile(root, input) {
   return file;
 }
 
-export async function bridgeCommand({ sessionId, root, bridgeDir, command, request = fetch }) {
+async function bridgeRegistration({ sessionId, root, bridgeDir }) {
   const registration = await readFile(path.join(bridgeDir, `${workspaceId(sessionId)}.json`), 'utf8').then(JSON.parse).catch(() => null);
   if (!registration || registration.workspace !== root || !Number.isInteger(registration.port) || registration.port < 1 || registration.port > 65535 || !/^[a-f0-9]{64}$/.test(registration.token ?? '')) {
     throw new HttpError(503, '编辑器正在连接。请等待 code-server 加载，或检查 Amadeus Bridge 扩展。');
   }
+  return registration;
+}
+
+export async function bridgeEvents({ sessionId, root, bridgeDir, request = fetch, signal }) {
+  const registration = await bridgeRegistration({ sessionId, root, bridgeDir });
+  let response;
+  try {
+    response = await request(`http://127.0.0.1:${registration.port}/events`, {
+      headers: { Authorization: `Bearer ${registration.token}` }, signal,
+    });
+  } catch { throw new HttpError(503, '编辑器连接中断，请等待重连后重试。'); }
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new HttpError(response.status, result.error || 'Editor events failed');
+  }
+  return response;
+}
+
+export async function bridgeCommand({ sessionId, root, bridgeDir, command, request = fetch }) {
+  const registration = await bridgeRegistration({ sessionId, root, bridgeDir });
   let response;
   try {
     response = await request(`http://127.0.0.1:${registration.port}/command`, {

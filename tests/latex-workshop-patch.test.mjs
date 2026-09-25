@@ -5,6 +5,10 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { patchViewerSource, patchLatexWorkshop, LATEX_WORKSHOP_VIEWER_FILES } from '../scripts/patch-latex-workshop.mjs';
 
+const pdfPrintGuard = `if (window.parent !== window) {
+      return;
+    }`;
+
 test('viewer asset patch keeps Chinese CMaps and fonts under forwarded port and is idempotent', () => {
   const source = 'cMapUrl: "../cmaps/", standardFontDataUrl: \'../standard_fonts/\', workerSrc: "./build/pdf.worker.mjs"';
   const patched = patchViewerSource('out/viewer/latexworkshop.js', source);
@@ -17,6 +21,11 @@ test('viewer asset patch keeps Chinese CMaps and fonts under forwarded port and 
     assert.equal(new URL(`${absolute}font`, 'https://pad.example/amadeus/code/proxy/45943/build/pdf.worker.mjs').pathname, `/amadeus/code/proxy/45943/${asset}/font`);
   }
   assert.equal(patchViewerSource('out/viewer/latexworkshop.js', source.replaceAll('../', './')), patched);
+  const viewer = `"../cmaps/"; "../standard_fonts/";\n${pdfPrintGuard}`;
+  const patchedViewer = patchViewerSource('viewer/viewer.mjs', viewer);
+  assert.match(patchedViewer, /event\.preventDefault\(\);\s*event\.stopImmediatePropagation\(\);\s*return;/);
+  assert.equal(patchViewerSource('viewer/viewer.mjs', patchedViewer), patchedViewer);
+  assert.throws(() => patchViewerSource('viewer/viewer.mjs', viewer.replace(pdfPrintGuard, '')), /Unsupported LaTeX Workshop PDF print handler/);
   assert.throws(() => patchViewerSource('unknown.js', source), /Unsupported/);
   assert.throws(() => patchViewerSource('viewer/viewer.mjs', source + ', duplicate: "./cmaps/"'), /expected 1, found 2/);
   assert.throws(() => patchViewerSource('viewer/viewer.mjs', ''), /expected 1, found 0/);
@@ -30,7 +39,8 @@ test('extension patch validates version and every file before modifying any file
   for (const [file, counts] of Object.entries(LATEX_WORKSHOP_VIEWER_FILES)) {
     const filename = path.join(dir, file);
     await mkdir(path.dirname(filename), { recursive: true });
-    await writeFile(filename, Object.entries(counts).filter(([, count]) => count).map(([asset]) => `"../${asset}/"`).join(','));
+    const assets = Object.entries(counts).filter(([, count]) => count).map(([asset]) => `"../${asset}/"`).join(',');
+    await writeFile(filename, file === 'viewer/viewer.mjs' ? `${assets}\n${pdfPrintGuard}` : assets);
   }
   const first = path.join(dir, 'out/viewer/latexworkshop.js');
   const last = path.join(dir, 'viewer/viewer.mjs');

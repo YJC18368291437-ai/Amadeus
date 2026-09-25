@@ -116,6 +116,8 @@ Office 文件通过 DSH 原生 LibreOffice 服务转成预览 PDF；扫描件没
 
 非 Docker 开发需要 Node.js 24+，并自行启动 code-server、安装 `packages/editor/extension` 中的桥接扩展及 LaTeX Workshop；[非 Docker 配置示例](amadeus.example.yml)列出服务参数。
 
+启动 code-server 前，对固定的 `4.104.2` 安装目录执行 `node scripts/patch-code-server.mjs <code-server安装目录>`，然后重启 code-server 并刷新编辑器页面。Docker 构建自动完成此步骤。补丁安装按文件更新文档模型的内部命令，未知 workbench 构建会拒绝修改。
+
 ~~~bash
 npm ci
 npm test
@@ -125,5 +127,9 @@ npm run pack:plugins
 ~~~
 
 浏览器回归默认调用已安装的 Edge，可用 `TEST_BROWSER_CHANNEL=chrome` 切换。打包结果在 `.release/`：Login、Files、Reader、Editor 四个 `1.1.0` 插件包。正式 GitHub Release 附带这四个压缩包和 `SHA256SUMS`。
+
+`npm run test:editor-browser` 验证组件与模拟 iframe。真实失焦刷新回归使用 `npm run test:editor-live`：先将 `AMADEUS_TEST_IMAGE` 环境变量设为本地构建的 Amadeus 镜像标签。测试自动启动独立 Docker 容器，使用 `test-results/` 下的测试工作区验证宿主机写入、原子替换和未保存修改保护，结束时删除测试容器并保留截图。
+
+后台同步不依赖浏览器焦点：扩展监听文档生命周期与目录事件，并每秒对已跟踪的打开文件执行一次元数据检查。该检查用于 Docker Desktop 等可能漏文件事件的挂载目录，不扫描整个工作区；只有发现版本变化时才读取文档。未保存修改会显示冲突，需用户明确选择重新加载才会丢弃。
 
 代码位置：`packages/login` 负责认证，`packages/files` 负责工作区文件，`packages/reader` 负责注释与原生预览增强，`packages/editor` 负责 code-server 集成。详细变更见 [CHANGELOG.md](CHANGELOG.md)。
