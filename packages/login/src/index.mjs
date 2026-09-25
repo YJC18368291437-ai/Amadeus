@@ -2,6 +2,7 @@ import WebServer from '@deepseek-ai/dsh-host-webserver';
 import z from '@deepseek-ai/schemastery';
 import { createAuth } from './auth.mjs';
 import { injectBrowserCompatibility } from './browser-compat.mjs';
+import { registerPwaRoutes } from './pwa.mjs';
 import { PrefixUpgradeRoutes } from './upgrade-routes.mjs';
 
 // Substitution is restricted to the webserver composition row; no global dsh files change.
@@ -23,6 +24,8 @@ export default class AmadeusWebServer extends WebServer {
     this.upgrades = new PrefixUpgradeRoutes(this.upgrades);
     this.auth = auth;
     ctx.effect(() => this.tapIndex(injectBrowserCompatibility));
+    // PWA bootstrap resources must be fetchable before a Basic Auth session is established.
+    ctx.effect(() => registerPwaRoutes(route => WebServer.prototype.register.call(this, route)));
     ctx.inject(['connection'], scope => {
       const connection = scope.connection;
       const previous = {

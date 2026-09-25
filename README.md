@@ -2,7 +2,7 @@
 
 Amadeus 是面向单用户的 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 工作台扩展。它在 DSH 原生对话和文件侧栏中加入项目文件管理、内嵌 code-server、LaTeX 编译，以及可定位原文的选区注释。
 
-**当前版本：v1.1.0。** 固定依赖 DSH `0.1.6-alpha.2`、code-server `4.104.2` 和 LaTeX Workshop `10.9.0`。推荐用 Docker Compose 部署；宿主机无需单独安装 Node.js、code-server 或 TeX Live。
+**当前版本：v1.1.2。** 当前代码固定依赖 DSH `0.1.7-rc.2`（预发布候选版）、code-server `4.104.2` 和 LaTeX Workshop `10.9.0`。推荐用 Docker Compose 部署；宿主机无需单独安装 Node.js、code-server 或 TeX Live。
 
 ## 能做什么
 
@@ -13,6 +13,7 @@ Amadeus 是面向单用户的 [DeepSeek Harness（DSH）](https://github.com/dee
 | LaTeX | 镜像内含 TeX Live、XeLaTeX、latexmk、Biber、中文字体和 LaTeX Workshop |
 | 选区注释 | 选中对话、原生文档或编辑器文本，填写可选评论后点蓝色对勾；回答里的注释引用可定位原文 |
 | 工作区 | 上传文件或文件夹、下载 ZIP、处理重名与删除确认；工作区文件保存在宿主机目录 |
+| 网页浏览器 | 在右侧侧栏打开隔离的 HTTP(S) 网页，与当前工作区并排浏览 |
 | 外观 | DSH 与编辑器可分别选择浅色、深色或跟随系统；侧栏可收起中间对话 |
 
 ## Docker Compose 部署
@@ -22,7 +23,7 @@ Amadeus 是面向单用户的 [DeepSeek Harness（DSH）](https://github.com/dee
 安装 Docker Engine 与 Compose，或启用 Linux 容器的 Docker Desktop。克隆正式版并准备私有配置和工作区：
 
 ~~~bash
-git clone --branch v1.1.0 --depth 1 https://github.com/whyself/Amadeus.git
+git clone --branch v1.1.2 --depth 1 https://github.com/whyself/Amadeus.git
 cd Amadeus
 cp amadeus.docker.example.yml amadeus.local.yml
 mkdir -p workspace
@@ -31,7 +32,7 @@ mkdir -p workspace
 Windows PowerShell 对应命令：
 
 ~~~powershell
-git clone --branch v1.1.0 --depth 1 https://github.com/whyself/Amadeus.git
+git clone --branch v1.1.2 --depth 1 https://github.com/whyself/Amadeus.git
 Set-Location Amadeus
 Copy-Item amadeus.docker.example.yml amadeus.local.yml
 New-Item -ItemType Directory -Force workspace
@@ -79,7 +80,7 @@ docker compose up -d
 
 ~~~bash
 git fetch --tags
-git switch --detach v1.1.0
+git switch --detach v1.1.2
 docker compose up -d --build
 ~~~
 
@@ -90,6 +91,10 @@ docker compose up -d --build
 默认配置仅开放宿主机回环地址。远程访问时，在同一台机器上用 HTTPS 反向代理转发到 `127.0.0.1:3080`，并启用 WebSocket 转发；[nginx 示例](deploy/nginx.conf.example)可放入现有 HTTPS `server` 块。Basic 登录凭据必须通过 HTTPS 传输。
 
 容器中的无密码 code-server 只监听容器回环地址 `127.0.0.1:8080`，不向宿主机发布端口；Amadeus 的认证代理负责它的 HTTP 和 WebSocket 请求。
+
+### PWA 安装
+
+Amadeus 内置可安装 PWA。使用 `http://127.0.0.1:3080` 或配置 HTTPS 反向代理访问，登录后即可在 Chrome、Edge 等浏览器的地址栏或菜单中选择“安装 Amadeus”。PWA 使用独立缓存保存已访问的页面和静态资源；文件、编辑器、会话接口和 WebSocket 始终走网络，不会被 service worker 离线缓存。
 
 ## 日常使用
 
@@ -115,6 +120,8 @@ Office 文件通过 DSH 原生 LibreOffice 服务转成预览 PDF；扫描件没
 
 非 Docker 开发需要 Node.js 24+，并自行启动 code-server、安装 `packages/editor/extension` 中的桥接扩展及 LaTeX Workshop；[非 Docker 配置示例](amadeus.example.yml)列出服务参数。
 
+启动 code-server 前，对固定的 `4.104.2` 安装目录执行 `node scripts/patch-code-server.mjs <code-server安装目录>`，然后重启 code-server 并刷新编辑器页面。Docker 构建自动完成此步骤。补丁安装按文件更新文档模型的内部命令，未知 workbench 构建会拒绝修改。
+
 ~~~bash
 npm ci
 npm test
@@ -123,6 +130,10 @@ npm run test:editor-browser
 npm run pack:plugins
 ~~~
 
-浏览器回归默认调用已安装的 Edge，可用 `TEST_BROWSER_CHANNEL=chrome` 切换。打包结果在 `.release/`：Login、Files、Reader、Editor 四个 `1.1.0` 插件包。正式 GitHub Release 附带这四个压缩包和 `SHA256SUMS`。
+浏览器回归默认调用已安装的 Edge，可用 `TEST_BROWSER_CHANNEL=chrome` 切换。打包结果在 `.release/`：Login、Files、Reader、Editor 四个 `1.1.2` 插件包。正式 GitHub Release 附带这四个压缩包和 `SHA256SUMS`。
+
+`npm run test:editor-browser` 验证组件与模拟 iframe。真实失焦刷新回归使用 `npm run test:editor-live`：先将 `AMADEUS_TEST_IMAGE` 环境变量设为本地构建的 Amadeus 镜像标签。测试自动启动独立 Docker 容器，使用 `test-results/` 下的测试工作区验证宿主机写入、原子替换和未保存修改保护，结束时删除测试容器并保留截图。
+
+后台同步不依赖浏览器焦点：扩展监听文档生命周期与目录事件，并每秒对已跟踪的打开文件执行一次元数据检查。该检查用于 Docker Desktop 等可能漏文件事件的挂载目录，不扫描整个工作区；只有发现版本变化时才读取文档。未保存修改会显示冲突，需用户明确选择重新加载才会丢弃。
 
 代码位置：`packages/login` 负责认证，`packages/files` 负责工作区文件，`packages/reader` 负责注释与原生预览增强，`packages/editor` 负责 code-server 集成。详细变更见 [CHANGELOG.md](CHANGELOG.md)。

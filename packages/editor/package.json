@@ -1,6 +1,6 @@
 {
   "name": "dsh-amadeus-editor",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "type": "module",
   "main": "dist/index.mjs",
   "exports": {
@@ -27,6 +27,6 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": "^4.0.4"
   }
 }

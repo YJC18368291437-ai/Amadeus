@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { parseEditableAddress } from '../../reader/src/file-address.mjs';
 import { acquireBrowserIdentity } from './browser-identity.mjs';
 import { attachWorkbench, disposeWorkbenches, getWorkbenchFrame } from './frame-cache.mjs';
+import { createWorkspaceSync } from './workspace-sync.mjs';
 import styles from './editor.css';
 import { installEditorAppearance, resolvedEditorAppearance } from './appearance.jsx';
 import { setAmadeusLocale, useAmadeusLocale, tr } from '../../reader/src/locale.mjs';
@@ -13,7 +14,65 @@ const browserIdentity = acquireBrowserIdentity({ storage: sessionStorage, locks:
 const closeChecks = new Map();
 const closeKey = (sessionId, tabId) => JSON.stringify([sessionId, tabId]);
 const openedNavigations = new Map();
+const workspaceSyncs = new Map();
 function EditorTitle() { useAmadeusLocale(); return tr('编辑器', 'Editor'); }
+
+function retainWorkspaceSync({ key, command, url, signal, callbacks }) {
+  let entry = workspaceSyncs.get(key);
+  if (!entry) {
+    if (signal?.aborted) return { sync: null, error: null, release() {} };
+    entry = { callbacks: null, error: null };
+    const notify = (name, value) => entry.callbacks?.[name]?.(value);
+    entry.sync = createWorkspaceSync({
+      command,
+      onConflict: value => notify('onConflict', value),
+      onSynced: value => notify('onSynced', value),
+      onMissing: value => notify('onMissing', value),
+      onError: value => {
+        entry.error = value.error;
+        notify('onError', value);
+      },
+    });
+    entry.events = new EventSource(url);
+    entry.events.onopen = () => {
+      entry.error = null;
+      notify('onConnected');
+    };
+    entry.events.onmessage = message => {
+      try { entry.sync.handleDocumentEvent(JSON.parse(message.data)); }
+      catch (error) {
+        entry.error = error;
+        notify('onError', { error });
+      }
+    };
+    entry.events.onerror = () => {
+      entry.error = new Error(tr('编辑器文档状态连接中断，正在重连。', 'Editor document state connection interrupted; reconnecting.'));
+      notify('onError', { error: entry.error });
+    };
+    const dispose = () => {
+      signal?.removeEventListener('abort', dispose);
+      if (workspaceSyncs.get(key) === entry) workspaceSyncs.delete(key);
+      entry.callbacks = null;
+      entry.events.close();
+      void entry.sync.dispose();
+    };
+    entry.dispose = dispose;
+    workspaceSyncs.set(key, entry);
+    signal?.addEventListener('abort', dispose, { once: true });
+  }
+  entry.callbacks = callbacks;
+  callbacks.onConflicts?.(entry.sync.getConflicts());
+  if (entry.error) callbacks.onError?.({ error: entry.error });
+  return {
+    sync: entry.sync,
+    error: entry.error,
+    release() { if (entry.callbacks === callbacks) entry.callbacks = null; },
+  };
+}
+
+function disposeWorkspaceSyncs() {
+  for (const entry of workspaceSyncs.values()) entry.dispose();
+}
 
 async function responseJson(response) {
   const body = await response.json();
@@ -31,6 +90,9 @@ export function EditorTab({ useTabInfo, sessionId }) {
   const query = new URLSearchParams({ session: session || '', instance: `${tab.id}-${browserId}` }).toString();
   const [url, setUrl] = useState(''), [error, setError] = useState(''), [ready, setReady] = useState(false), [loaded, setLoaded] = useState(false), [retry, setRetry] = useState(0);
   const [selection, setSelection] = useState(null);
+  const [syncConflicts, setSyncConflicts] = useState({});
+  const [syncError, setSyncError] = useState('');
+  const workspaceSync = useRef(null);
   const selectionHovered = useRef(false);
   const suppressedSelection = useRef(null);
   useEffect(() => { suppressedSelection.current = null; }, [retry]);
@@ -60,6 +122,34 @@ export function EditorTab({ useTabInfo, sessionId }) {
     command('fontSize').then(result => { if (active && Number.isInteger(result.size)) fontSize.current = result.size; }).catch(error => { if (active) setError(error.message); });
     return () => { active = false; };
   }, [ready, session, browserId]);
+
+  useEffect(() => {
+    if (!ready || !loaded || !session || !browserId) return;
+    const callbacks = {
+      onConflicts: setSyncConflicts,
+      onConflict: ({ path }) => setSyncConflicts(current => ({ ...current, [path]: 'changed' })),
+      onSynced: ({ path }) => {
+        setSyncConflicts(current => { const next = { ...current }; delete next[path]; return next; });
+        setSyncError('');
+      },
+      onMissing: ({ path }) => setSyncConflicts(current => ({ ...current, [path]: 'missing' })),
+      onError: ({ error }) => setSyncError(error?.message || tr('无法监听工作区文件变化。', 'Could not watch workspace file changes.')),
+      onConnected: () => setSyncError(''),
+    };
+    const binding = retainWorkspaceSync({
+      key: JSON.stringify([session, tab.id, browserId]),
+      command,
+      url: `/amadeus/editor/events?${query}`,
+      signal: tab.signal,
+      callbacks,
+    });
+    workspaceSync.current = binding.sync;
+    setSyncError(binding.error?.message || '');
+    return () => {
+      binding.release();
+      if (workspaceSync.current === binding.sync) workspaceSync.current = null;
+    };
+  }, [ready, loaded, session, tab.id, tab.signal, browserId, query]);
   useEffect(() => {
     if (!loaded) return;
     let doc;
@@ -67,6 +157,14 @@ export function EditorTab({ useTabInfo, sessionId }) {
     if (!doc) return;
     const onKeyDown = event => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (event.key.toLowerCase() === 'p') {
+        // Keep Ctrl/⌘+P (and Ctrl/⌘+Shift+P) inside the code-server frame.
+        // Some tablet browsers let their print shortcut take over after the
+        // first VS Code Quick Open; cancel the browser default at capture time
+        // while still letting VS Code's keybinding service handle the event.
+        event.preventDefault();
+        return;
+      }
       let direction;
       if (event.key === '+' || event.key === '=') direction = 1;
       else if (event.key === '-' || event.key === '_') direction = -1;
@@ -194,6 +292,14 @@ export function EditorTab({ useTabInfo, sessionId }) {
   return <section className="amadeus-code-workbench" ref={holder}>
     {(!ready || !loaded) && !error && <div className="amadeus-code-loading" role="status">{tr('正在连接编辑器…', 'Connecting to editor…')}</div>}
     {error && <div className="amadeus-code-error" role="alert">{error} <button onClick={() => { setRetry(Date.now()); }}>{tr('重试连接', 'Retry connection')}</button></div>}
+    {syncError && <div className="amadeus-code-sync-notice" role="status">{tr('文件变更监听暂不可用，编辑器原生监听仍会继续工作。', 'File change notifications are unavailable; the editor’s native watcher remains active.')}</div>}
+    {Object.entries(syncConflicts).map(([path, state]) => <div className="amadeus-code-sync-notice" role="alert" key={path}>
+      <span>{state === 'missing' ? tr('工作区中的文件已被删除：', 'This workspace file was deleted:') : tr('该文件在编辑器有未保存修改时被外部更新：', 'This file changed externally while the editor has unsaved edits:')} {path}</span>
+      {state !== 'missing' && <button onClick={() => {
+        if (!window.confirm(tr('重新载入会丢弃该文件的未保存修改。是否继续？', 'Reloading discards this file’s unsaved edits. Continue?'))) return;
+        void workspaceSync.current?.reload(path);
+      }}>{tr('丢弃未保存修改并重新载入', 'Discard edits and reload')}</button>}
+    </div>)}
     <div ref={frame} className="amadeus-code-placeholder" />
     {selection && createPortal(<button className="amadeus-code-selection-pill" style={{ left: selection.left, top: selection.top }} onPointerEnter={() => { selectionHovered.current = true; }} onPointerLeave={() => { selectionHovered.current = false; }} onMouseDown={event => event.preventDefault()} onClick={() => addSelection(selection)}>＋ {tr('添加到对话', 'Add to chat')}</button>, document.body)}
   </section>;
@@ -202,9 +308,9 @@ export function EditorTab({ useTabInfo, sessionId }) {
 export function apply(ctx) {
   setAmadeusLocale(ctx.locale);
   ctx.effect(() => installEditorAppearance(ctx));
-  ctx.effect(() => () => { disposeWorkbenches(); closeChecks.clear(); });
+  ctx.effect(() => () => { disposeWorkspaceSyncs(); disposeWorkbenches(); closeChecks.clear(); });
   ctx.effect(() => ctx.sidebarRightTabs.register({ id, kind, priority: 'extension', title: () => tr('编辑器', 'Editor'), guide: [{ id: 'editor', order: 11, title: () => tr('编辑器', 'Editor'), description: () => tr('打开代码工作台', 'Open the code workspace') }] }));
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: id }, EditorTab)));
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({ name: 'sidebar.right.pane.tab', key: id }, props => <EditorTab {...props} />)));
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({ name: 'sidebar.right.pane.tab.title', key: id }, EditorTitle)));
   ctx.effect(() => {
     const style = document.createElement('style'); style.textContent = styles; document.head.append(style);

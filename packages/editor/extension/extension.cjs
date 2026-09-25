@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
+const { createDocumentSync } = require('./document-sync.cjs');
 
 let active;
 function failure(message, status = 400) { return Object.assign(new Error(message), { status }); }
@@ -19,6 +20,7 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
   const root = await fs.realpath(workspace);
   const token = crypto.randomBytes(32).toString('hex');
   const registration = path.join(directory, `${bridgeId}.json`);
+  const documentStreams = new Set();
   async function checked(file) {
     if (typeof file !== 'string' || !path.isAbsolute(file)) throw failure('An absolute file path is required.');
     let resolved;
@@ -44,6 +46,17 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
     await checked(uri.fsPath);
     return current;
   }
+  function emitDocumentEvent(event) {
+    const encoded = `data: ${JSON.stringify(event)}\n\n`;
+    for (const stream of documentStreams) {
+      if (!stream.ready) stream.pending.push(encoded);
+      else stream.response.write(encoded);
+    }
+  }
+  const sync = createDocumentSync({
+    checked, emit: emitDocumentEvent,
+    reload: (document, discard) => vscode.commands.executeCommand('amadeus.reloadFile', document.uri, discard),
+  });
   async function command(body) {
     switch (body.action) {
       case 'open': {
@@ -68,6 +81,17 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
         return { opened: true };
       }
       case 'status': return { dirty: vscode.workspace.textDocuments.some(document => document.isDirty) || vscode.workspace.notebookDocuments.some(notebook => notebook.isDirty) };
+      case 'documents': return { documents: sync.documents() };
+      case 'externalChange': {
+        if (typeof body.path !== 'string' || !path.isAbsolute(body.path)) throw failure('An absolute file path is required.');
+        const file = path.resolve(body.path);
+        if (!inside(root, file)) throw failure('File is outside this workspace.', 403);
+        return sync.check(file);
+      }
+      case 'reload': {
+        const file = await checked(body.path);
+        return sync.check(file, { force: true, discard: body.discard === true });
+      }
       case 'theme': {
         if (!['light', 'dark'].includes(body.theme)) throw failure('Invalid editor theme.');
         await vscode.workspace.getConfiguration('workbench').update('colorTheme', body.theme === 'dark' ? 'Default Dark+' : 'Default Light+', vscode.ConfigurationTarget.Global);
@@ -90,11 +114,46 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
       default: throw failure('Unsupported editor action.');
     }
   }
+  const listeners = [
+    vscode.workspace.onDidOpenTextDocument?.(document => { void sync.track(document); }),
+    vscode.workspace.onDidCloseTextDocument?.(sync.close),
+    vscode.workspace.onDidChangeTextDocument?.(event => { void sync.track(event.document); }),
+    vscode.workspace.onDidSaveTextDocument?.(document => { void sync.track(document); }),
+  ].filter(Boolean);
   const server = http.createServer(async (request, response) => {
     const send = (status, value) => { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); };
     try {
-      if (request.method !== 'POST' || request.url !== '/command') throw failure('Not found.', 404);
       if (request.headers.authorization !== `Bearer ${token}`) throw failure('Unauthorized.', 401);
+      if (request.method === 'GET' && request.url === '/events') {
+        const stream = { response, ready: false, pending: [] };
+        documentStreams.add(stream);
+        response.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive',
+          'x-accel-buffering': 'no',
+        });
+        response.flushHeaders?.();
+        const keepAlive = setInterval(() => { if (stream.ready) response.write(': keep-alive\n\n'); }, 20000);
+        const remove = () => { clearInterval(keepAlive); documentStreams.delete(stream); };
+        request.once('aborted', remove);
+        response.once('close', remove);
+        try {
+          const documents = sync.documents();
+          if (response.destroyed) return;
+          response.write(`data: ${JSON.stringify({ type: 'snapshot', documents })}\n\n`);
+          stream.ready = true;
+          for (const event of stream.pending.splice(0)) {
+            if (response.destroyed) break;
+            response.write(event);
+          }
+        } catch (error) {
+          remove();
+          response.destroy(error);
+        }
+        return;
+      }
+      if (request.method !== 'POST' || request.url !== '/command') throw failure('Not found.', 404);
       let length = 0;
       const chunks = [];
       for await (const chunk of request) {
@@ -108,20 +167,28 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
       send(200, await command(body));
     } catch (error) { if (!response.headersSent) send(error.status || 500, { error: error.message || 'Editor command failed.' }); }
   });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  server.on('error', error => vscode.window.showErrorMessage(`Amadeus editor bridge: ${error.message}`));
   const temporary = `${registration}.${token}.tmp`;
   try {
+    await Promise.all((vscode.workspace.textDocuments || []).map(document => sync.track(document)));
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+    server.on('error', error => vscode.window.showErrorMessage(`Amadeus editor bridge: ${error.message}`));
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     await fs.writeFile(temporary, JSON.stringify({ port: server.address().port, token, pid: process.pid, workspace }), { mode: 0o600 });
     await fs.rename(temporary, registration);
   } catch (error) {
+    for (const listener of listeners) listener.dispose();
+    await sync.dispose();
     server.close();
+    server.closeAllConnections();
     await fs.unlink(temporary).catch(() => {});
     throw error;
   }
   return {
     async dispose() {
+      for (const listener of listeners) listener.dispose();
+      await sync.dispose();
+      for (const stream of documentStreams) stream.response.end();
+      documentStreams.clear();
       await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
       try { const entry = JSON.parse(await fs.readFile(registration, 'utf8')); if (entry.token === token) await fs.unlink(registration); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     }

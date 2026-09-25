@@ -16,12 +16,18 @@ test('editor bridge authenticates, confines files, and exposes only editor actio
   await fs.writeFile(outside, 'secret');
   const calls = [];
   const settings = { workbench: { colorTheme: 'Default Light+' }, editor: { fontSize: 16 } };
-  const document = { uri: { scheme: 'file', fsPath: file }, lineCount: 1, getText: () => 'hello', positionAt: character => ({ line: 0, character }) };
+  const document = { uri: { scheme: 'file', fsPath: file }, isDirty: true, lineCount: 1, getText: () => 'hello', positionAt: character => ({ line: 0, character }) };
   const current = { document, selection: { start: { line: 0 }, end: { line: 0 } }, revealRange() {} };
   const vscode = {
-    workspace: { getConfiguration: section => section === 'amadeus' ? { get: () => 'a'.repeat(64) } : { get: key => settings[section]?.[key], update: async (key, value) => { settings[section][key] = value; } }, workspaceFolders: [{ uri: { fsPath: workspace } }], textDocuments: [{ isDirty: true }], openTextDocument: async () => document },
-    window: { activeTextEditor: current, showTextDocument: async () => current, showErrorMessage() {} },
-    commands: { executeCommand: async command => calls.push(command) },
+    workspace: { getConfiguration: section => section === 'amadeus' ? { get: () => 'a'.repeat(64) } : { get: key => settings[section]?.[key], update: async (key, value) => { settings[section][key] = value; } }, workspaceFolders: [{ uri: { fsPath: workspace } }], textDocuments: [document], openTextDocument: async () => document },
+    window: { activeTextEditor: current, visibleTextEditors: [current], showTextDocument: async () => current, showErrorMessage() {} },
+    commands: { executeCommand: async (command, uri, discard) => {
+      calls.push(command);
+      assert.equal(uri, document.uri);
+      if (document.isDirty && !discard) return { open: true, dirty: true };
+      document.isDirty = false;
+      return { open: true, dirty: false, refreshed: true };
+    } },
     Uri: { file: fsPath => ({ fsPath }) },
     Position: class { constructor(line, character) { this.line = line; this.character = character; } },
     Selection: class { constructor(start, end) { this.start = start; this.end = end; } },
@@ -36,6 +42,11 @@ test('editor bridge authenticates, confines files, and exposes only editor actio
   const invoke = (body, token = registration.token) => fetch(`http://127.0.0.1:${registration.port}/command`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
   assert.equal((await invoke({ action: 'status' }, 'invalid')).status, 401);
   assert.deepEqual(await (await invoke({ action: 'status' })).json(), { dirty: true });
+  assert.deepEqual(await (await invoke({ action: 'documents' })).json(), { documents: [{ path: file, dirty: true }] });
+  assert.deepEqual(await (await invoke({ action: 'reload', path: file })).json(), { open: true, dirty: true });
+  assert.deepEqual(calls, [], 'dirty documents are never reverted without explicit discard');
+  assert.deepEqual(await (await invoke({ action: 'reload', path: file, discard: true })).json(), { open: true, dirty: false, refreshed: true });
+  assert.deepEqual(calls, ['amadeus.reloadFile']);
   assert.equal((await invoke({ action: 'open', path: outside })).status, 403);
   assert.equal((await invoke({ action: 'open', path: 'paper.tex' })).status, 400);
   assert.equal((await invoke({ action: 'open', path: file, text: 'ell' })).status, 200);
@@ -53,17 +64,38 @@ test('editor bridge authenticates, confines files, and exposes only editor actio
   for (const action of ['save', 'undo', 'redo', 'markdown-preview', 'latex-build', 'latex-preview']) {
     assert.equal((await invoke({ action })).status, 400);
   }
-  assert.deepEqual(calls, []);
+  assert.deepEqual(calls, ['amadeus.reloadFile'], 'unexposed VS Code commands stay unavailable');
   document.getText = () => 'x'.repeat(50000);
   assert.equal((await invoke({ action: 'selection' })).status, 200);
   document.getText = () => 'x'.repeat(50001);
   assert.equal((await invoke({ action: 'selection' })).status, 413);
   assert.equal((await invoke({ action: 'open', path: file, text: 'a'.repeat(66000) })).status, 413);
+  const beforeWatcher = calls.length;
+  await fs.writeFile(file, 'agent changed this file');
+  for (let i = 0; i < 200 && calls.length === beforeWatcher; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(calls.slice(beforeWatcher), ['amadeus.reloadFile'], 'disk writes reload without injecting a watcher event or connecting a browser');
 });
 
 test('unconfigured workbench skips bridge startup quietly', async () => {
   const vscode = { workspace: { getConfiguration: () => ({ get: () => '' }) } };
   assert.equal(await bridgeModule.createBridge(vscode), undefined);
+});
+
+test('failed bridge registration disposes document lifecycle listeners before retrying', async t => {
+  const temporary = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'amadeus-bridge-failure-')));
+  t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+  const directory = path.join(temporary, 'not-a-directory');
+  await fs.writeFile(directory, '');
+  let installed = 0, disposed = 0;
+  const listen = () => { installed++; return { dispose() { disposed++; } }; };
+  const vscode = { workspace: {
+    getConfiguration: () => ({ get: () => 'a'.repeat(64) }), workspaceFolders: [{ uri: { fsPath: temporary } }], textDocuments: [],
+    onDidOpenTextDocument: listen, onDidCloseTextDocument: listen, onDidChangeTextDocument: listen, onDidSaveTextDocument: listen,
+  }, window: { showErrorMessage() {} } };
+  await assert.rejects(bridgeModule.createBridge(vscode, directory));
+  await assert.rejects(bridgeModule.createBridge(vscode, directory));
+  assert.equal(installed, 8);
+  assert.equal(disposed, installed);
 });
 
 test('bridge activation waits for folders, replaces registrations, and disposes late startup', async t => {

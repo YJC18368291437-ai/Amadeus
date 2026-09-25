@@ -55,6 +55,11 @@ const server = http.createServer(async (request, response) => {
     requests.push({ type: 'workspace', instance: url.searchParams.get('instance') });
     json({ url: `/amadeus/code/?${url.searchParams}` }); return;
   }
+  if (url.pathname === '/amadeus/editor/events') {
+    response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    response.write('data: {"type":"snapshot","documents":[]}\n\n');
+    return;
+  }
   if (url.pathname === '/amadeus/editor/command') {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
