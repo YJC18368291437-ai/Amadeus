@@ -26,10 +26,22 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
     if (!inside(root, resolved)) throw failure('File is outside this workspace.', 403);
     return resolved;
   }
+  // Notebook cells are ordinary text editors whose document URI scheme is
+  // `vscode-notebook-cell:`; map them back to the owning notebook file so the
+  // same selection flow works for both plain files and notebook cells.
+  function editorFile(current) {
+    const uri = current.document.uri;
+    if (uri.scheme === 'file') return uri;
+    if (current.notebook) return current.notebook.uri;
+    if (uri.scheme === 'vscode-notebook-cell') return vscode.Uri.file(uri.path);
+    return uri;
+  }
   async function editor() {
     const current = vscode.window.activeTextEditor;
-    if (!current || current.document.uri.scheme !== 'file') throw failure('Open a workspace file first.', 409);
-    await checked(current.document.uri.fsPath);
+    if (!current) throw failure('Open a workspace file first.', 409);
+    const uri = editorFile(current);
+    if (uri.scheme !== 'file') throw failure('Open a workspace file first.', 409);
+    await checked(uri.fsPath);
     return current;
   }
   async function command(body) {
@@ -38,6 +50,12 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
         const file = await checked(body.path);
         if (body.text !== undefined && typeof body.text !== 'string') throw failure('text must be a string.');
         if (body.line !== undefined && (!Number.isInteger(body.line) || body.line < 1)) throw failure('line must be a positive integer.');
+        if (path.extname(file).toLowerCase() === '.ipynb') {
+          try {
+            await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(file), 'jupyter-notebook', { preview: false, preserveFocus: false });
+            return { opened: true };
+          } catch { /* fall back to the text editor when no notebook handler is installed */ }
+        }
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
         const current = await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
         let start, end;
@@ -49,7 +67,7 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
         if (start) { current.selection = new vscode.Selection(start, end); current.revealRange(new vscode.Range(start, end)); }
         return { opened: true };
       }
-      case 'status': return { dirty: vscode.workspace.textDocuments.some(document => document.isDirty) };
+      case 'status': return { dirty: vscode.workspace.textDocuments.some(document => document.isDirty) || vscode.workspace.notebookDocuments.some(notebook => notebook.isDirty) };
       case 'theme': {
         if (!['light', 'dark'].includes(body.theme)) throw failure('Invalid editor theme.');
         await vscode.workspace.getConfiguration('workbench').update('colorTheme', body.theme === 'dark' ? 'Default Dark+' : 'Default Light+', vscode.ConfigurationTarget.Global);
@@ -67,7 +85,7 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
         const current = await editor();
         const text = current.document.getText(current.selection);
         if (text.length > 50000) throw failure('Selection exceeds 50,000 characters. Select a smaller passage.', 413);
-        return { text, path: path.relative(root, await checked(current.document.uri.fsPath)).split(path.sep).join('/'), lineStart: current.selection.start.line + 1, lineEnd: current.selection.end.line + 1 };
+        return { text, path: path.relative(root, await checked(editorFile(current).fsPath)).split(path.sep).join('/'), lineStart: current.selection.start.line + 1, lineEnd: current.selection.end.line + 1 };
       }
       default: throw failure('Unsupported editor action.');
     }
