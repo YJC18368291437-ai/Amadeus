@@ -6,10 +6,11 @@ import { chromium } from '@playwright/test';
 import yaml from 'js-yaml';
 
 const config = yaml.load(await readFile(process.argv[2], 'utf8'));
+const port = Number(process.env.TEST_PORT || config.port || 3080);
 const browser = await chromium.launch({ headless: true, channel: process.env.TEST_BROWSER_CHANNEL || 'msedge' });
 try {
   const page = await browser.newPage({ httpCredentials: { username: config.username, password: config.password }, viewport: { width: 1400, height: 1000 } });
-  await page.goto(`http://127.0.0.1:${config.port || 3080}`);
+  await page.goto(`http://127.0.0.1:${port}`);
   const input = page.locator('[contenteditable=true]');
   await input.click();
   const cdp = await page.context().newCDPSession(page);
