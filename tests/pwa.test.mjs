@@ -4,7 +4,7 @@ import { injectBrowserCompatibility } from '../packages/login/src/browser-compat
 import { registerPwaRoutes, serviceWorkerSource } from '../packages/login/src/pwa.mjs';
 
 test('homepage intentionally ships without a PWA manifest or service worker', () => {
-  const html = injectBrowserCompatibility('<html><head><script>boot()</script></head></html>');
+  const html = injectBrowserCompatibility('<html><head><link rel="manifest" href="./manifest.webmanifest"><script>boot()</script></head></html>');
   assert.doesNotMatch(html, /rel="manifest"/);
   assert.doesNotMatch(html, /serviceWorker\.register/);
 });

@@ -205,6 +205,7 @@ function installPromiseWithResolvers() {
 export function injectBrowserCompatibility(html) {
   return html
     .replace(/<link\b[^>]*rel=["']icon["'][^>]*>/i, '')
+    .replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/i, '')
     .replace(/<meta\b[^>]*name=["']viewport["'][^>]*>/i, VIEWPORT_META)
     .replace(/<\/head>/i, head => `${VIEWPORT_LOCK}${head}`)
     .replace(/<head\b[^>]*>/i, head => `${head}${ICON_LINKS}<script>(${installPromiseWithResolvers.toString()})();</script><script>(${installBrowserCrypto.toString()})();</script><script>(${installIosStandaloneEditableFix.toString()})();</script><script>(${blockNativePageZoom.toString()})();</script><script>(${installDocumentScrollLock.toString()})();</script>`);
