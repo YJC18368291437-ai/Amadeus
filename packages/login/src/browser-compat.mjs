@@ -92,6 +92,11 @@ const ICON_LINKS = '<link rel="apple-touch-icon" sizes="180x180" href="/deepseek
 // zoom with touch handlers, and those keep firing — only the browser's
 // competing page zoom goes away. Panels still scroll normally.
 //
+// CSS alone is not enough: iOS before 16.4 ignores `overscroll-behavior`, and
+// even on current iOS a drag that starts on a non-scrolling region (or runs a
+// scroll container past its edge) rubber-bands the whole document visually.
+// installDocumentScrollLock is the JS backstop for those cases.
+//
 // Appended late in <head> so it wins over the harness stylesheets.
 const VIEWPORT_LOCK_CSS = `
 html { height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; }
@@ -100,6 +105,75 @@ body { position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; o
 `;
 
 const VIEWPORT_LOCK = `<style>${VIEWPORT_LOCK_CSS}</style>`;
+
+// Hard-lock finger gestures to the app: the page itself must never be dragged
+// up/down/sideways, while real scroll containers inside keep working.
+//
+// The CSS lock above stops the document from having anything to scroll, but
+// iOS Safari still lets a finger pan/rubber-band a fixed, overflow:hidden
+// document (and older iOS ignores overscroll-behavior entirely). The fix is a
+// non-passive touchmove listener that answers every gesture with
+// preventDefault() unless the gesture can be handed to something legitimate:
+//
+//   - the touch starts on / inside an editable (inputs, textareas,
+//     contenteditable) so the keyboard, caret and text selection keep working;
+//   - some ancestor scroll container (overflow: auto/scroll) can still move in
+//     the gesture's direction — then the default is left alone so that
+//     container scrolls, including chained scrolling through nested panels.
+//
+// Anything else — drags on bare layout, edge-of-panel overscroll, pull to
+// refresh attempts — is swallowed, so the page stays nailed to the viewport.
+function installDocumentScrollLock() {
+  const EDITABLE = 'input,textarea,select,[contenteditable]';
+  let tracking = false;
+  let startX = 0;
+  let startY = 0;
+
+  document.addEventListener('touchstart', event => {
+    tracking = event.touches.length === 1;
+    if (tracking) {
+      startX = event.touches[0].clientX;
+      startY = event.touches[0].clientY;
+    }
+  }, { passive: true, capture: true });
+
+  const release = () => { tracking = false; };
+  document.addEventListener('touchend', release, { passive: true, capture: true });
+  document.addEventListener('touchcancel', release, { passive: true, capture: true });
+
+  const canScroll = (el, dx, dy) => {
+    const style = getComputedStyle(el);
+    const vertical = Math.abs(dy) >= Math.abs(dx);
+    const overflow = vertical ? style.overflowY : style.overflowX;
+    if (overflow !== 'auto' && overflow !== 'scroll' && overflow !== 'overlay') return false;
+    const position = vertical ? el.scrollTop : el.scrollLeft;
+    const size = vertical ? el.clientHeight : el.clientWidth;
+    const extent = vertical ? el.scrollHeight : el.scrollWidth;
+    if ((vertical ? dy : dx) < 0) return position + size < extent - 1;
+    return position > 1;
+  };
+
+  document.addEventListener('touchmove', event => {
+    if (!event.cancelable) return;
+    if (event.touches.length > 1) return;
+    if (!tracking) { event.preventDefault(); return; }
+    const touch = event.touches[0];
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
+    if (dx === 0 && dy === 0) return;
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) return;
+    let node = event.target;
+    while (node && node !== document.documentElement) {
+      if (node.nodeType === 1) {
+        if (node.closest && node.closest(EDITABLE)) return;
+        if (canScroll(node, dx, dy)) return;
+      }
+      node = node.parentElement;
+    }
+    event.preventDefault();
+  }, { passive: false, capture: true });
+}
 
 // Safari ignores `user-scalable=no` for ordinary pages, and its native pinch
 // arrives as gesture events before any touch handler runs. Swallow those three
@@ -133,5 +207,5 @@ export function injectBrowserCompatibility(html) {
     .replace(/<link\b[^>]*rel=["']icon["'][^>]*>/i, '')
     .replace(/<meta\b[^>]*name=["']viewport["'][^>]*>/i, VIEWPORT_META)
     .replace(/<\/head>/i, head => `${VIEWPORT_LOCK}${head}`)
-    .replace(/<head\b[^>]*>/i, head => `${head}${ICON_LINKS}<script>(${installPromiseWithResolvers.toString()})();</script><script>(${installBrowserCrypto.toString()})();</script><script>(${installIosStandaloneEditableFix.toString()})();</script><script>(${blockNativePageZoom.toString()})();</script>`);
+    .replace(/<head\b[^>]*>/i, head => `${head}${ICON_LINKS}<script>(${installPromiseWithResolvers.toString()})();</script><script>(${installBrowserCrypto.toString()})();</script><script>(${installIosStandaloneEditableFix.toString()})();</script><script>(${blockNativePageZoom.toString()})();</script><script>(${installDocumentScrollLock.toString()})();</script>`);
 }
