@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2 — 2026-09-25（正式版）
+
+- 新增可安装 PWA：提供 manifest、service worker、192/512 图标、独立缓存和移动端元信息，支持桌面浏览器与 Android 平板安装。
+- PWA 启动资源支持 Tailscale HTTPS 和 Android 安装检查；manifest、service worker 与图标无需登录即可读取，文件、会话、编辑器和 WebSocket 业务接口仍由 Basic Auth 保护。
+- 默认本地服务端口统一为 `3080`，并完成 `3080` Docker 部署验证。
+- 四个插件统一发布为 `1.1.2`；通过完整 Node 测试、构建、打包校验和浏览器 service worker 注册验证。
+
 ## 1.1.1 — 2026-09-25（正式版）
 
 - 修复编辑器失去焦点后文件不刷新的问题。扩展在后台维护已打开文档，结合文件事件和元数据检查，即使 Windows/Docker 挂载目录漏发文件事件，也能自动刷新。

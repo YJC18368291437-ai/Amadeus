@@ -2,7 +2,7 @@
 
 Amadeus 是面向单用户的 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 工作台扩展。它在 DSH 原生对话和文件侧栏中加入项目文件管理、内嵌 code-server、LaTeX 编译，以及可定位原文的选区注释。
 
-**当前版本：v1.1.1。** 当前代码固定依赖 DSH `0.1.7-rc.2`（预发布候选版）、code-server `4.104.2` 和 LaTeX Workshop `10.9.0`。推荐用 Docker Compose 部署；宿主机无需单独安装 Node.js、code-server 或 TeX Live。
+**当前版本：v1.1.2。** 当前代码固定依赖 DSH `0.1.7-rc.2`（预发布候选版）、code-server `4.104.2` 和 LaTeX Workshop `10.9.0`。推荐用 Docker Compose 部署；宿主机无需单独安装 Node.js、code-server 或 TeX Live。
 
 ## 能做什么
 
@@ -23,7 +23,7 @@ Amadeus 是面向单用户的 [DeepSeek Harness（DSH）](https://github.com/dee
 安装 Docker Engine 与 Compose，或启用 Linux 容器的 Docker Desktop。克隆正式版并准备私有配置和工作区：
 
 ~~~bash
-git clone --branch v1.1.1 --depth 1 https://github.com/whyself/Amadeus.git
+git clone --branch v1.1.2 --depth 1 https://github.com/whyself/Amadeus.git
 cd Amadeus
 cp amadeus.docker.example.yml amadeus.local.yml
 mkdir -p workspace
@@ -32,7 +32,7 @@ mkdir -p workspace
 Windows PowerShell 对应命令：
 
 ~~~powershell
-git clone --branch v1.1.1 --depth 1 https://github.com/whyself/Amadeus.git
+git clone --branch v1.1.2 --depth 1 https://github.com/whyself/Amadeus.git
 Set-Location Amadeus
 Copy-Item amadeus.docker.example.yml amadeus.local.yml
 New-Item -ItemType Directory -Force workspace
@@ -80,7 +80,7 @@ docker compose up -d
 
 ~~~bash
 git fetch --tags
-git switch --detach v1.1.1
+git switch --detach v1.1.2
 docker compose up -d --build
 ~~~
 
@@ -91,6 +91,10 @@ docker compose up -d --build
 默认配置仅开放宿主机回环地址。远程访问时，在同一台机器上用 HTTPS 反向代理转发到 `127.0.0.1:3080`，并启用 WebSocket 转发；[nginx 示例](deploy/nginx.conf.example)可放入现有 HTTPS `server` 块。Basic 登录凭据必须通过 HTTPS 传输。
 
 容器中的无密码 code-server 只监听容器回环地址 `127.0.0.1:8080`，不向宿主机发布端口；Amadeus 的认证代理负责它的 HTTP 和 WebSocket 请求。
+
+### PWA 安装
+
+Amadeus 内置可安装 PWA。使用 `http://127.0.0.1:3080` 或配置 HTTPS 反向代理访问，登录后即可在 Chrome、Edge 等浏览器的地址栏或菜单中选择“安装 Amadeus”。PWA 使用独立缓存保存已访问的页面和静态资源；文件、编辑器、会话接口和 WebSocket 始终走网络，不会被 service worker 离线缓存。
 
 ## 日常使用
 
@@ -126,7 +130,7 @@ npm run test:editor-browser
 npm run pack:plugins
 ~~~
 
-浏览器回归默认调用已安装的 Edge，可用 `TEST_BROWSER_CHANNEL=chrome` 切换。打包结果在 `.release/`：Login、Files、Reader、Editor 四个 `1.1.1` 插件包。正式 GitHub Release 附带这四个压缩包和 `SHA256SUMS`。
+浏览器回归默认调用已安装的 Edge，可用 `TEST_BROWSER_CHANNEL=chrome` 切换。打包结果在 `.release/`：Login、Files、Reader、Editor 四个 `1.1.2` 插件包。正式 GitHub Release 附带这四个压缩包和 `SHA256SUMS`。
 
 `npm run test:editor-browser` 验证组件与模拟 iframe。真实失焦刷新回归使用 `npm run test:editor-live`：先将 `AMADEUS_TEST_IMAGE` 环境变量设为本地构建的 Amadeus 镜像标签。测试自动启动独立 Docker 容器，使用 `test-results/` 下的测试工作区验证宿主机写入、原子替换和未保存修改保护，结束时删除测试容器并保留截图。
 

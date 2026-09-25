@@ -17,5 +17,5 @@ function installBrowserCrypto() {
 // HTTP on a public IP has getRandomValues but no randomUUID. Install before
 // dsh's module loader so native APIs and all four plugins see the same API.
 export function injectBrowserCompatibility(html) {
-  return html.replace(/<head\b[^>]*>/i, head => `${head}<script>(${installBrowserCrypto.toString()})();</script>`);
+  return html.replace(/<head\b[^>]*>/i, head => `${head}<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials"><meta name="theme-color" content="#4078cf"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Amadeus"><script>(${installBrowserCrypto.toString()})();</script><script>if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {}), { once: true });</script>`);
 }

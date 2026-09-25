@@ -1,5 +1,7 @@
-import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
 await rm('.release', { recursive: true, force: true });
 await mkdir('.release', { recursive: true });
 const npmCli = process.env.npm_execpath;
@@ -15,3 +17,8 @@ const expected = (await Promise.all(packages.map(async name => {
 }))).sort();
 const actual = (await readdir('.release')).filter(name => name.endsWith('.tgz')).sort();
 if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(`Unexpected release packages: ${actual.join(', ')}`);
+const checksums = (await Promise.all(actual.map(async name => {
+  const hash = createHash('sha256').update(await readFile(path.join('.release', name))).digest('hex');
+  return `${hash}  ${name}`;
+}))).join('\n') + '\n';
+await writeFile('.release/SHA256SUMS', checksums, 'ascii');
