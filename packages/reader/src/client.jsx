@@ -483,7 +483,7 @@ export function apply(ctx) {
         const Native = entry.component;
         if (kind === 'assistant-step') {
           const WrappedAssistant = props => { if (props.sessionId) activeSession.id = props.sessionId; return <AssistantWithAnnotationLinks {...props} Native={Native} openAnnotation={openAnnotation} />; };
-          disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'amadeus-annotated-assistant' }, WrappedAssistant));
+          disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, inject: entry.inject, locale: entry.locale, priority: -100, registrant: 'amadeus-annotated-assistant' }, WrappedAssistant));
           continue;
         }
         const Wrapped = props => {
@@ -493,7 +493,7 @@ export function apply(ctx) {
           const amadeus = parseAnnotatedPrompt(text);
           return amadeus ? <SentAnnotations {...props} node={{ ...node, data: { ...node.data, amadeus } }} /> : <Native {...props} />;
         };
-        disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, locale: entry.locale, priority: -100, registrant: 'amadeus-annotated-user' }, Wrapped));
+        disposers.push(ctx.slots.register({ ...entry.options, name: 'conversation.chat.node', key: kind, inject: entry.inject, locale: entry.locale, priority: -100, registrant: 'amadeus-annotated-user' }, Wrapped));
       }
     }
     install(); const unsubscribe = ctx.slots.subscribe('conversation.chat.node', install);
