@@ -35,8 +35,13 @@ function retainWorkspaceSync({ key, command, url, signal, callbacks }) {
     });
     entry.events = new EventSource(url);
     entry.events.onopen = () => {
+      const reconnected = entry.error !== null && entry.error !== undefined;
       entry.error = null;
       notify('onConnected');
+      // A stream that had errored and is now open again means the editor backend
+      // restarted. The kept-alive workbench iframe may still hold the dead
+      // session (notably on iOS Safari), so the tab owner must rebuild it.
+      if (reconnected) notify('onReconnected');
     };
     entry.events.onmessage = message => {
       try { entry.sync.handleDocumentEvent(JSON.parse(message.data)); }
@@ -93,6 +98,7 @@ export function EditorTab({ useTabInfo, sessionId }) {
   const [syncConflicts, setSyncConflicts] = useState({});
   const [syncError, setSyncError] = useState('');
   const workspaceSync = useRef(null);
+  const recoveredAt = useRef(0);
   const selectionHovered = useRef(false);
   const suppressedSelection = useRef(null);
   useEffect(() => { suppressedSelection.current = null; }, [retry]);
@@ -133,8 +139,13 @@ export function EditorTab({ useTabInfo, sessionId }) {
         setSyncError('');
       },
       onMissing: ({ path }) => setSyncConflicts(current => ({ ...current, [path]: 'missing' })),
-      onError: ({ error }) => setSyncError(error?.message || tr('无法监听工作区文件变化。', 'Could not watch workspace file changes.')),
+      onError: ({ error }) => {
+        setSyncError(error?.message || tr('无法监听工作区文件变化。', 'Could not watch workspace file changes.'));
+        beginEditorRecovery();
+      },
       onConnected: () => setSyncError(''),
+      // Fast path for browsers whose EventSource re-fires `open` after a drop.
+      onReconnected: () => beginEditorRecovery(),
     };
     const binding = retainWorkspaceSync({
       key: JSON.stringify([session, tab.id, browserId]),
@@ -287,6 +298,23 @@ export function EditorTab({ useTabInfo, sessionId }) {
     const next = direction === 0 ? 16 : Math.max(10, Math.min(36, fontSize.current + direction));
     fontSize.current = next;
     void command('fontSize', { size: next }).catch(error => setError(error.message));
+  }
+  function rebuildEditor() {
+    openedNavigations.delete(closeKey(session, tab.id));
+    try { sessionStorage.removeItem(`amadeus.editor.navigation.${session}.${tab.id}.${browserId}`); } catch {}
+    setRetry(Date.now());
+  }
+  // The document-events stream is the first thing to notice a backend restart.
+  // A stale kept-alive iframe (notably on iOS Safari, which neither reconnects
+  // nor reloads it) keeps code-server from ever re-registering the bridge, so
+  // waiting is futile: drop the frame so code-server reloads the workspace, and
+  // let the open effect's own 503 retry re-open the file once it is back. Rate
+  // limited so a flapping stream cannot spin the iframe.
+  function beginEditorRecovery() {
+    const now = Date.now();
+    if (now - recoveredAt.current < 15000) return;
+    recoveredAt.current = now;
+    setTimeout(() => rebuildEditor(), 500);
   }
   if (!session) return <p>{tr('请从文件列表打开要编辑的文件。', 'Open a file from the file list to edit it.')}</p>;
   return <section className="amadeus-code-workbench" ref={holder}>
