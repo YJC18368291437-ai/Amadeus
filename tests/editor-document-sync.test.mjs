@@ -81,6 +81,19 @@ test('dirty conflicts survive snapshots and retry once clean, without acknowledg
   assert.equal(sync.documents()[0].conflict, undefined);
 });
 
+test('completed saves acknowledge the editor write instead of reporting an external conflict', async t => {
+  const { sync, open, root } = await fixture(t);
+  const document = await open('saved.txt'), file = document.uri.fsPath;
+  document.isDirty = true;
+  document.text = 'my saved draft';
+  await fs.writeFile(file, document.text);
+  document.isDirty = false;
+  assert.deepEqual(await sync.saved(document), { open: true, saved: true });
+  await sync.reconcile();
+  assert.equal(sync.documents()[0].conflict, undefined);
+  assert.equal(sync.documents()[0].dirty, false);
+});
+
 test('failed reload retries the same disk version and concurrent hints serialize per file', async t => {
   const { sync, open, failNext, events, intercept } = await fixture(t, { intervalMs: 60000 });
   const document = await open('a.txt'), file = document.uri.fsPath;

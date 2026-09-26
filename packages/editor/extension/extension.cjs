@@ -118,7 +118,7 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
     vscode.workspace.onDidOpenTextDocument?.(document => { void sync.track(document); }),
     vscode.workspace.onDidCloseTextDocument?.(sync.close),
     vscode.workspace.onDidChangeTextDocument?.(event => { void sync.track(event.document); }),
-    vscode.workspace.onDidSaveTextDocument?.(document => { void sync.track(document); }),
+    vscode.workspace.onDidSaveTextDocument?.(document => { void sync.saved(document); }),
   ].filter(Boolean);
   const server = http.createServer(async (request, response) => {
     const send = (status, value) => { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); };

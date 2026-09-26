@@ -125,6 +125,30 @@ function createDocumentSync({ checked, reload, emit, intervalMs = 1000, debounce
     emit({ type: 'close', path: state.path });
   }
 
+  // VS Code can report the file watcher write before the mobile/browser save
+  // event has flipped isDirty back to false. A completed save is authoritative:
+  // acknowledge that disk version so the editor does not flag its own write as
+  // an external conflict. Later writes still produce a normal conflict.
+  function saved(document) {
+    const uriPath = document?.uri?.fsPath && path.resolve(document.uri.fsPath);
+    const state = [...states.values()].find(item => item.uriPath === uriPath);
+    if (!state || disposed) return Promise.resolve({ open: false });
+    return enqueue(state, async () => {
+      if (!live(state)) return { open: false };
+      state.dirty = Boolean(document.isDirty);
+      if (document.isDirty) return { open: true, dirty: true };
+      const version = await diskVersion(state.uriPath);
+      if (!live(state)) return { open: false };
+      state.version = version;
+      state.observed = version;
+      state.error = null;
+      state.conflict = version === null ? 'missing' : undefined;
+      const result = { open: true, saved: true };
+      emit({ type: 'external-refresh', path: state.path, result });
+      return result;
+    });
+  }
+
   async function reconcile() {
     if (disposed) return;
     syncWatchers();
@@ -137,7 +161,7 @@ function createDocumentSync({ checked, reload, emit, intervalMs = 1000, debounce
   }
   poll();
   return {
-    track, close, check, reconcile,
+    track, saved, close, check, reconcile,
     documents: () => [...states.values()].filter(live).map(payload),
     async dispose() {
       disposed = true;
