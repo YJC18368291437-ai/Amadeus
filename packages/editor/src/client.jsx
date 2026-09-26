@@ -98,10 +98,11 @@ export function EditorTab({ useTabInfo, sessionId }) {
   const [syncConflicts, setSyncConflicts] = useState({});
   const [syncError, setSyncError] = useState('');
   const workspaceSync = useRef(null);
-  const recoveredAt = useRef(0);
+  const recovering = useRef(false);
   const selectionHovered = useRef(false);
   const suppressedSelection = useRef(null);
   useEffect(() => { suppressedSelection.current = null; }, [retry]);
+  useEffect(() => () => { recovering.current = false; }, []);
   const fontSize = useRef(16);
   const holder = useRef(), frame = useRef();
   const command = (action, extra = {}, signal) => fetch(`/amadeus/editor/command?${query}`, {
@@ -221,7 +222,7 @@ export function EditorTab({ useTabInfo, sessionId }) {
         if (!disposed) setError('');
       } catch (err) {
         if (disposed) return;
-        if (err.status === 503 && Date.now() < deadline) timer = setTimeout(open, 1000);
+        if (err.status === 503 && Date.now() < deadline) timer = setTimeout(open, 300);
         else setError(err.message);
       }
     };
@@ -307,14 +308,23 @@ export function EditorTab({ useTabInfo, sessionId }) {
   // The document-events stream is the first thing to notice a backend restart.
   // A stale kept-alive iframe (notably on iOS Safari, which neither reconnects
   // nor reloads it) keeps code-server from ever re-registering the bridge, so
-  // waiting is futile: drop the frame so code-server reloads the workspace, and
-  // let the open effect's own 503 retry re-open the file once it is back. Rate
-  // limited so a flapping stream cannot spin the iframe.
+  // waiting is futile. Rebuild the frame so code-server reloads the workspace
+  // and registers the bridge again. One rebuild is not enough: if it lands
+  // while code-server is still down the new iframe latches onto a proxy error
+  // page, so keep rebuilding until the bridge answers, then let the open
+  // effect (which sees the cleared navigation cache) re-open the file.
   function beginEditorRecovery() {
-    const now = Date.now();
-    if (now - recoveredAt.current < 15000) return;
-    recoveredAt.current = now;
-    setTimeout(() => rebuildEditor(), 500);
+    if (recovering.current) return;
+    recovering.current = true;
+    let attempts = 0;
+    const attempt = async () => {
+      attempts += 1;
+      rebuildEditor();
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      try { await command('status'); recovering.current = false; }
+      catch { if (attempts < 30) void attempt(); else recovering.current = false; }
+    };
+    void attempt();
   }
   if (!session) return <p>{tr('请从文件列表打开要编辑的文件。', 'Open a file from the file list to edit it.')}</p>;
   return <section className="amadeus-code-workbench" ref={holder}>
