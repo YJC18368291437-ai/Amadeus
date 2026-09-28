@@ -81,6 +81,20 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
         return { opened: true };
       }
       case 'status': return { dirty: vscode.workspace.textDocuments.some(document => document.isDirty) || vscode.workspace.notebookDocuments.some(notebook => notebook.isDirty) };
+      case 'opened': {
+        if (typeof body.path !== 'string' || !path.isAbsolute(body.path)) throw failure('An absolute file path is required.');
+        const target = path.resolve(body.path);
+        const matches = uri => uri?.scheme === 'file' && path.resolve(uri.fsPath) === target;
+        // "Opened" means the workbench is actually showing this file. Membership in
+        // textDocuments/notebookDocuments is not enough: VS Code keeps a document
+        // alive after its editor tab is closed, so a blank workbench would still
+        // report the file as open. A notebook is shown by a NotebookEditor, for
+        // which activeTextEditor is undefined, so both editor kinds are checked.
+        let opened = false;
+        if (vscode.window.activeTextEditor) { try { opened = matches(editorFile(vscode.window.activeTextEditor)); } catch { opened = false; } }
+        if (!opened && vscode.window.activeNotebookEditor?.notebook) opened = matches(vscode.window.activeNotebookEditor.notebook.uri);
+        return { opened };
+      }
       case 'documents': return { documents: sync.documents() };
       case 'externalChange': {
         if (typeof body.path !== 'string' || !path.isAbsolute(body.path)) throw failure('An absolute file path is required.');

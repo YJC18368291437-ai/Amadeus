@@ -5,7 +5,7 @@ import { prepareWorkspace, editorFile, bridgeCommand, bridgeEvents } from './wor
 import { createBackgroundRefresh } from './background-refresh.mjs';
 
 export const inject = ['webServer', 'sessions', 'fs'];
-const actions = new Set(['open', 'selection', 'status', 'documents', 'reload', 'theme', 'fontSize']);
+const actions = new Set(['open', 'selection', 'status', 'opened', 'documents', 'reload', 'theme', 'fontSize']);
 
 function waitForResponse(res) {
   return new Promise(resolve => {
@@ -85,6 +85,10 @@ export async function apply(ctx, config = {}) {
       input.path = await editorFile(root, command.path);
       if (typeof command.text === 'string') input.text = command.text.slice(0, 50000);
       if (Number.isSafeInteger(command.line) && command.line > 0) input.line = command.line;
+    }
+    if (input.action === 'opened') {
+      if (typeof command.path !== 'string' || !command.path) throw new HttpError(400, 'File path is required');
+      input.path = await editorFile(root, command.path);
     }
     if (input.action === 'reload') {
       if (typeof command.path !== 'string' || !command.path) throw new HttpError(400, 'File path is required');

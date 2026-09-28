@@ -200,7 +200,7 @@ export function EditorTab({ useTabInfo, sessionId }) {
   useEffect(() => {
     if (!url || !session || !browserId) return;
     let disposed = false, timer;
-    const controller = new AbortController(), deadline = Date.now() + 90000;
+    const controller = new AbortController(), startedAt = Date.now();
     setReady(false); setError('');
     const open = async () => {
       try {
@@ -213,7 +213,17 @@ export function EditorTab({ useTabInfo, sessionId }) {
           const storageKey = `amadeus.editor.navigation.${session}.${tab.id}.${browserId}`;
           let previous = openedNavigations.get(key);
           if (!previous) { try { previous = sessionStorage.getItem(storageKey); } catch {} }
-          if (previous !== navigation) {
+          // The navigation cache only records what we last asked for, not what the
+          // workbench still shows. code-server can drop an opened file on its own —
+          // a workbench reload, an extension-host restart, or another editor tab
+          // switching code-server's single workspace — while this tab keeps the
+          // file name and leaves an empty editor. Confirm against the bridge and
+          // re-open whenever the file is gone, not only when the navigation changed.
+          let retained = false;
+          if (previous === navigation) {
+            try { retained = (await command('opened', { path: file.path }, controller.signal)).opened === true; } catch { retained = false; }
+          }
+          if (previous !== navigation || !retained) {
             await command('open', { path: file.path, text: tab.navigation.params?.amadeusAnnotation?.text }, controller.signal);
             openedNavigations.set(key, navigation);
             try { sessionStorage.setItem(storageKey, navigation); } catch {}
@@ -222,13 +232,51 @@ export function EditorTab({ useTabInfo, sessionId }) {
         if (!disposed) setError('');
       } catch (err) {
         if (disposed) return;
-        if (err.status === 503 && Date.now() < deadline) timer = setTimeout(open, 300);
-        else setError(err.message);
+        if (err.status === 503) {
+          // The bridge only answers after code-server reloads the workspace. If it
+          // stays silent — a kept-alive iframe holding a dead session, or an
+          // outage the document-events stream never reported — kick off the frame
+          // rebuild loop instead of polling forever, and never abandon the wait on
+          // the old 90s deadline so a slow restart can still recover.
+          if (Date.now() - startedAt > 4000) beginEditorRecovery();
+          timer = setTimeout(open, 300);
+          return;
+        }
+        setError(err.message);
       }
     };
     void open();
     return () => { disposed = true; clearTimeout(timer); controller.abort(); };
   }, [url, address, session, browserId, tab.navigation.revision, retry]);
+
+  // A visible editor tab must never stay empty. The workbench can lose the opened
+  // file long after the open effect ran (see above), so keep confirming the file is
+  // still open and re-open it when it is not. Inactive tabs are skipped so they
+  // never fight the active tab for code-server's single workspace.
+  useEffect(() => {
+    if (!ready || !loaded || !file || !session || !browserId || tab.visible === false) return;
+    let stopped = false, timer, pending = false;
+    const verify = async () => {
+      if (stopped) return;
+      if (!document.hidden && !pending) {
+        pending = true;
+        try {
+          const state = await command('opened', { path: file.path });
+          if (!stopped && state.opened === false) {
+            const key = closeKey(session, tab.id);
+            const navigation = JSON.stringify([address, tab.navigation.revision]);
+            await command('open', { path: file.path, text: tab.navigation.params?.amadeusAnnotation?.text });
+            openedNavigations.set(key, navigation);
+            try { sessionStorage.setItem(`amadeus.editor.navigation.${session}.${tab.id}.${browserId}`, navigation); } catch {}
+          }
+        } catch { /* bridge busy or gone; the open effect owns backend recovery */ }
+        finally { pending = false; }
+      }
+      if (!stopped) timer = setTimeout(verify, 4000);
+    };
+    void verify();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [ready, loaded, file?.path, session, tab.id, tab.visible, browserId, address, tab.navigation.revision]);
 
   useEffect(() => {
     if (!ready) return;
@@ -329,7 +377,7 @@ export function EditorTab({ useTabInfo, sessionId }) {
   if (!session) return <p>{tr('请从文件列表打开要编辑的文件。', 'Open a file from the file list to edit it.')}</p>;
   return <section className="amadeus-code-workbench" ref={holder}>
     {(!ready || !loaded) && !error && <div className="amadeus-code-loading" role="status">{tr('正在连接编辑器…', 'Connecting to editor…')}</div>}
-    {error && <div className="amadeus-code-error" role="alert">{error} <button onClick={() => { setRetry(Date.now()); }}>{tr('重试连接', 'Retry connection')}</button></div>}
+    {error && <div className="amadeus-code-error" role="alert">{error} <button onClick={() => beginEditorRecovery()}>{tr('重试连接', 'Retry connection')}</button></div>}
     {syncError && <div className="amadeus-code-sync-notice" role="status">{tr('文件变更监听暂不可用，编辑器原生监听仍会继续工作。', 'File change notifications are unavailable; the editor’s native watcher remains active.')}</div>}
     {Object.entries(syncConflicts).map(([path, state]) => <div className="amadeus-code-sync-notice" role="alert" key={path}>
       <span>{state === 'missing' ? tr('工作区中的文件已被删除：', 'This workspace file was deleted:') : tr('该文件在编辑器有未保存修改时被外部更新：', 'This file changed externally while the editor has unsaved edits:')} {path}</span>

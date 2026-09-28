@@ -43,6 +43,16 @@ test('editor bridge authenticates, confines files, and exposes only editor actio
   assert.equal((await invoke({ action: 'status' }, 'invalid')).status, 401);
   assert.deepEqual(await (await invoke({ action: 'status' })).json(), { dirty: true });
   assert.deepEqual(await (await invoke({ action: 'documents' })).json(), { documents: [{ path: file, dirty: true }] });
+  assert.deepEqual(await (await invoke({ action: 'opened', path: file })).json(), { opened: true });
+  assert.deepEqual(await (await invoke({ action: 'opened', path: path.join(workspace, 'other.tex') })).json(), { opened: false });
+  assert.equal((await invoke({ action: 'opened', path: 'paper.tex' })).status, 400);
+  vscode.window.activeTextEditor = undefined;
+  vscode.window.activeNotebookEditor = { notebook: { uri: { scheme: 'file', fsPath: file } } };
+  assert.deepEqual(await (await invoke({ action: 'opened', path: file })).json(), { opened: true });
+  vscode.window.activeNotebookEditor = { notebook: { uri: { scheme: 'file', fsPath: path.join(workspace, 'other.tex') } } };
+  assert.deepEqual(await (await invoke({ action: 'opened', path: file })).json(), { opened: false });
+  vscode.window.activeTextEditor = current;
+  vscode.window.activeNotebookEditor = undefined;
   assert.deepEqual(await (await invoke({ action: 'reload', path: file })).json(), { open: true, dirty: true });
   assert.deepEqual(calls, [], 'dirty documents are never reverted without explicit discard');
   assert.deepEqual(await (await invoke({ action: 'reload', path: file, discard: true })).json(), { open: true, dirty: false, refreshed: true });

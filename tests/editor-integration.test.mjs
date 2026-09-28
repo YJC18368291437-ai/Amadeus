@@ -83,6 +83,8 @@ test('editor host prepares isolated workspaces and forwards validated commands t
   };
   bridge = await extension.createBridge(vscode, bridgeDir);
   assert.deepEqual(await (await command({ action: 'status' })).json(), { dirty: true });
+  assert.deepEqual(await (await command({ action: 'opened', path: 'paper.tex' })).json(), { opened: true });
+  assert.equal((await command({ action: 'opened', path: 'missing.tex' })).status, 404);
   assert.deepEqual(await (await command({ action: 'open', path: 'paper.tex', command: 'terminal.new' })).json(), { opened: true });
   assert.deepEqual(calls[0], ['open', path.join(canonicalRoot, 'paper.tex')]);
   assert.deepEqual(calls[1], ['show', { preview: false, preserveFocus: false }]);
