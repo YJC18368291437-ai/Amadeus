@@ -105,6 +105,9 @@ body { position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; o
 `;
 
 const VIEWPORT_LOCK = `<style>${VIEWPORT_LOCK_CSS}</style>`;
+// Discourage iOS Safari from reusing a stale document, which would keep loading
+// plugin bundles pinned to an old rev and hide client-side fixes.
+const NO_CACHE_META = '<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"><meta http-equiv="Pragma" content="no-cache"><meta http-equiv="Expires" content="0">';
 
 // Hard-lock finger gestures to the app: the page itself must never be dragged
 // up/down/sideways, while real scroll containers inside keep working.
@@ -200,6 +203,59 @@ function installPromiseWithResolvers() {
   };
 }
 
+// DSH's native PDF preview loads pdf.js 6.x, whose worker calls the TC39
+// proposal methods Map.prototype.getOrInsert / Map.prototype.getOrInsertComputed.
+// Safari (iOS/iPadOS 18) does not ship them, so the PDF preview dies with
+// "this.#methodPromises.getOrInsertComputed is not a function". Install the
+// proposal semantics before any harness or lazy pdf chunk runs.
+function installMapGetOrInsert() {
+  const define = (Ctor, name, value) => {
+    if (!Ctor || !Ctor.prototype || typeof Ctor.prototype[name] === 'function') return;
+    Object.defineProperty(Ctor.prototype, name, { configurable: true, writable: true, value });
+  };
+  for (const Ctor of [Map, WeakMap]) {
+    define(Ctor, 'getOrInsert', function getOrInsert(key, defaultValue) {
+      if (this.has(key)) return this.get(key);
+      this.set(key, defaultValue);
+      return defaultValue;
+    });
+    define(Ctor, 'getOrInsertComputed', function getOrInsertComputed(key, callbackfn) {
+      if (this.has(key)) return this.get(key);
+      const value = callbackfn(key);
+      this.set(key, value);
+      return value;
+    });
+  }
+  for (const Ctor of [Set, WeakSet]) {
+    define(Ctor, 'getOrInsert', function getOrInsert(value) {
+      if (this.has(value)) return value;
+      this.add(value);
+      return value;
+    });
+  }
+}
+
+// The pdf.js Worker runs in its own JS realm, which the main-thread polyfill
+// above cannot reach. DSH builds that worker from a Blob of JavaScript source
+// (`new Blob([...], { type: "text/javascript" })` then `new Worker(blobUrl)`).
+// Wrap the Blob constructor so every JavaScript blob gets the polyfill prepended
+// to its source, which makes the worker realm patched too.
+function installWorkerBlobPolyfill(polyfillSource) {
+  const NativeBlob = typeof Blob === 'function' ? Blob : null;
+  if (!NativeBlob || !polyfillSource) return;
+  const marker = 'installMapGetOrInsert';
+  function PatchedBlob(parts, options) {
+    if (Array.isArray(parts) && options && typeof options.type === 'string' && /javascript/i.test(options.type)) {
+      const present = parts.some(part => typeof part === 'string' && part.indexOf(marker) !== -1);
+      if (!present) parts = [polyfillSource + '\n', ...parts];
+    }
+    return new NativeBlob(parts, options);
+  }
+  PatchedBlob.prototype = NativeBlob.prototype;
+  try { Object.defineProperty(PatchedBlob, 'name', { value: 'Blob' }); } catch (error) {}
+  window.Blob = PatchedBlob;
+}
+
 // HTTP on a public IP has getRandomValues but no randomUUID. Install before
 // dsh's module loader so native APIs and all four plugins see the same API.
 export function injectBrowserCompatibility(html) {
@@ -208,5 +264,5 @@ export function injectBrowserCompatibility(html) {
     .replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/i, '')
     .replace(/<meta\b[^>]*name=["']viewport["'][^>]*>/i, VIEWPORT_META)
     .replace(/<\/head>/i, head => `${VIEWPORT_LOCK}${head}`)
-    .replace(/<head\b[^>]*>/i, head => `${head}${ICON_LINKS}<script>(${installPromiseWithResolvers.toString()})();</script><script>(${installBrowserCrypto.toString()})();</script><script>(${installIosStandaloneEditableFix.toString()})();</script><script>(${blockNativePageZoom.toString()})();</script><script>(${installDocumentScrollLock.toString()})();</script>`);
+    .replace(/<head\b[^>]*>/i, head => `${head}${NO_CACHE_META}${ICON_LINKS}<script>(${installPromiseWithResolvers.toString()})();</script><script>(${installMapGetOrInsert.toString()})();(${installWorkerBlobPolyfill.toString()})(${JSON.stringify('(' + installMapGetOrInsert.toString() + ')();')});</script><script>(${installBrowserCrypto.toString()})();</script><script>(${installIosStandaloneEditableFix.toString()})();</script><script>(${blockNativePageZoom.toString()})();</script><script>(${installDocumentScrollLock.toString()})();</script>`);
 }
