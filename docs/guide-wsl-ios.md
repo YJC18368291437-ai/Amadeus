@@ -225,9 +225,13 @@ Safari 打开 5.3 的地址 `https://laptop-xxxx.xxx.ts.net`，输入账号密�
 建议点 **分享 → 添加到主屏幕**，以后像 App 一样一点就开。
 
 ## 实机效果（iPad）
+> 以下为真实 iPad 截图（个人姓名、电脑名、用户名、路径与对话标题已马赛克）。
+
 ![iPad 主页](assets/ipad-home.png)
-![iPad 代码编辑器](assets/ipad-editor.png)
-![iPad JupyterLab](assets/ipad-jupyter.png)
+![iPad 上的学习对话](assets/ipad-chat.png)
+![iPad 代码编辑器与终端](assets/ipad-editor.png)
+![iPad 文档预览](assets/ipad-reader.png)
+![iPad 思维图与 JupyterLab](assets/ipad-jupyter.png)
 
 ## 日常与排错
 - **开机后**：确认 Windows 上 Tailscale 已登录；打开一次「Ubuntu」（或运行 `wsl -d Ubuntu true`）让服务起来。
