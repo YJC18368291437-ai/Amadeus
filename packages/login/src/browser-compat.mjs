@@ -99,9 +99,10 @@ const ICON_LINKS = '<link rel="apple-touch-icon" sizes="180x180" href="/deepseek
 //
 // Appended late in <head> so it wins over the harness stylesheets.
 const VIEWPORT_LOCK_CSS = `
-html { height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; }
-body { position: fixed; inset: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: pan-x pan-y; -webkit-tap-highlight-color: transparent; }
-#root { height: 100%; }
+html { height: 100% !important; overflow: hidden !important; overscroll-behavior: none !important; touch-action: pan-x pan-y !important; -webkit-text-size-adjust: 100%; }
+body { height: 100% !important; overflow: hidden !important; overscroll-behavior: none !important; touch-action: pan-x pan-y !important; -webkit-tap-highlight-color: transparent; }
+#root { height: 100% !important; }
+* { overscroll-behavior: none !important; }
 `;
 
 const VIEWPORT_LOCK = `<style>${VIEWPORT_LOCK_CSS}</style>`;
@@ -190,6 +191,68 @@ function installDocumentScrollLock() {
     }
     event.preventDefault();
   }, { passive: false, capture: true });
+
+  // A Magic Keyboard trackpad delivers two-finger scrolling as `wheel`, not
+  // touch, so the touchmove guard above never sees it. iPadOS then pans the
+  // whole page for any trackpad scroll that no inner scroller consumes — every
+  // panel slides at once. The document has no overflow to scroll (the CSS lock
+  // makes it a non-scroller), yet the visual viewport still drifts, so the only
+  // reliable fix is to swallow the wheel too. Deliberately let a wheel through:
+  //
+  //   - Cmd/Ctrl + wheel: the app's own pinch — Safari's trackpad pinch arrives
+  //     as a ctrlKey wheel — and the reader's preview zoom. Never a page scroll.
+  //   - the wheel lands on / inside an editable (so a focused textarea or input
+  //     still scrolls its own content);
+  //   - some ancestor scroll container can still move that way (a panel list, a
+  //     reader document), so panels keep scrolling normally.
+  //
+  // Everything else is a drag on bare layout or an edge-of-panel overscroll, so
+  // it is ignored and the page stays nailed to the viewport.
+  // NOTE: wheel deltas are the opposite sign to finger displacement — a positive
+  // deltaY scrolls *down* (content moves up), whereas canScroll() reads a positive
+  // dy as "finger moved down, drag content up". Pass the negated deltas so the
+  // direction test is the same for both. Getting this backwards is what made a
+  // wheel from the top of a list get swallowed instead of scrolling it.
+  const pathOf = event => {
+    if (typeof event.composedPath === 'function') {
+      const path = event.composedPath();
+      if (path && path.length) return path;
+    }
+    const nodes = [];
+    for (let node = event.target; node; node = node.parentElement) nodes.push(node);
+    return nodes;
+  };
+  document.addEventListener('wheel', event => {
+    if (event.ctrlKey || event.metaKey) return;
+    if (!event.cancelable) return;
+    const dx = event.deltaX;
+    const dy = event.deltaY;
+    if (dx === 0 && dy === 0) return;
+    for (const node of pathOf(event)) {
+      if (!node || node.nodeType !== 1) continue;
+      if (node.closest && node.closest(EDITABLE)) return;
+      if (canScroll(node, -dx, -dy)) return;
+    }
+    event.preventDefault();
+  }, { passive: false, capture: true });
+
+  // iPadOS ignores the wheel preventDefault above for trackpad scrolling: it
+  // still moves the root scroller through a compositor-driven scroll with no
+  // cancel path, so `scrollY` drifts and the whole pinned layout shifts. There
+  // is nothing to scroll here — the body is pinned — so whenever the root moves,
+  // put it straight back. Inner panels scroll inside themselves and their scroll
+  // events never reach the window/document, so their scrolling is untouched.
+  const pinRoot = () => {
+    const root = document.scrollingElement || document.documentElement;
+    const moved = (root && (root.scrollTop !== 0 || root.scrollLeft !== 0))
+      || (typeof window !== 'undefined' && ((window.scrollY || 0) !== 0 || (window.scrollX || 0) !== 0));
+    if (!moved) return;
+    try { window.__amadeusPin = (window.__amadeusPin || 0) + 1; } catch (error) {}
+    if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') { try { window.scrollTo(0, 0); } catch (error) {} }
+    if (root) { root.scrollTop = 0; root.scrollLeft = 0; }
+  };
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('scroll', pinRoot, { passive: true });
+  document.addEventListener('scroll', pinRoot, { passive: true });
 }
 
 // Safari ignores `user-scalable=no` for ordinary pages, and its native pinch

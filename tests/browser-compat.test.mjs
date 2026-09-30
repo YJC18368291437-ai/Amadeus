@@ -28,19 +28,27 @@ test('HTTPS native UUID implementation is preserved', () => {
 });
 
 const scrollLockSource = () => {
-  const scripts = [...injectBrowserCompatibility('<head>').matchAll(/<script>([\s\S]*?)<\/script>/g)];
-  return scripts[scripts.length - 1][1];
+  const scripts = [...injectBrowserCompatibility('<head>').matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+  return scripts.find(source => source.includes('installDocumentScrollLock'));
 };
 
 const makeScrollLock = () => {
   const listeners = {};
+  const root = { nodeType: 1, scrollTop: 0, scrollLeft: 0 };
   const document = {
-    documentElement: { nodeType: 9 },
+    documentElement: root,
+    scrollingElement: root,
     addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
   };
-  runInNewContext(scrollLockSource(), { document, getComputedStyle: el => ({ overflowY: el.overflowY, overflowX: el.overflowX }), window: { getSelection: () => ({ rangeCount: 0, isCollapsed: true }) } });
+  const window = {
+    scrollX: 0, scrollY: 0,
+    scrollTo(x, y) { window.scrollX = x; window.scrollY = y; },
+    getSelection: () => ({ rangeCount: 0, isCollapsed: true }),
+    addEventListener(type, fn) { (listeners['win:' + type] ||= []).push(fn); },
+  };
+  runInNewContext(scrollLockSource(), { document, getComputedStyle: el => ({ overflowY: el.overflowY, overflowX: el.overflowX }), window });
   const fire = (type, event) => { for (const fn of listeners[type] || []) fn(event); };
-  return { fire };
+  return { fire, root, window };
 };
 
 const makeElement = ({ parent = null, overflowY = 'visible', scrollTop = 0, scrollHeight = 100, clientHeight = 100, editable = false } = {}) => ({
@@ -96,4 +104,43 @@ test('scroll lock blocks document drags but lets inner panels scroll', () => {
 
   const editable = makeElement({ editable: true });
   assert.equal(touch(lock, editable, { dy: -40 }), false, 'drags inside inputs/contenteditable stay native');
+});
+
+const wheel = (lock, target, { dx = 0, dy = -40 } = {}, { ctrl = false, meta = false } = {}) => {
+  const event = { target, cancelable: true, ctrlKey: ctrl, metaKey: meta, deltaX: dx, deltaY: dy, preventDefault() { this.prevented = true; } };
+  lock.fire('wheel', event);
+  return event.prevented === true;
+};
+
+test('scroll lock swallows trackpad wheel drags but keeps panels, edits and zoom working', () => {
+  const lock = makeScrollLock();
+
+  const bare = makeElement();
+  assert.equal(wheel(lock, bare, { dy: -40 }), true, 'trackpad scroll on non-scrollable layout must be prevented');
+
+  const panel = makeElement({ overflowY: 'scroll', scrollTop: 40, scrollHeight: 400, clientHeight: 100 });
+  const child = makeElement({ parent: panel });
+  assert.equal(wheel(lock, child, { dy: -40 }), false, 'wheel with room below must scroll the panel');
+
+  const edge = makeElement({ overflowY: 'scroll', scrollTop: 0, scrollHeight: 100, clientHeight: 100 });
+  const edgeChild = makeElement({ parent: edge });
+  assert.equal(wheel(lock, edgeChild, { dy: 40 }), true, 'wheel past the top edge must not move the page');
+
+  const editable = makeElement({ editable: true });
+  assert.equal(wheel(lock, editable, { dy: -40 }), false, 'wheel inside inputs/contenteditable stays native');
+
+  assert.equal(wheel(lock, bare, { dy: -40 }, { ctrl: true }), false, 'ctrl+wheel (pinch / preview zoom) must pass through');
+  assert.equal(wheel(lock, bare, { dy: -40 }, { meta: true }), false, 'cmd+wheel (preview zoom) must pass through');
+});
+
+test('scroll lock pins the document root back when iOS trackpad still moves it', () => {
+  const lock = makeScrollLock();
+  lock.root.scrollTop = 72; lock.root.scrollLeft = 72;
+  lock.window.scrollY = 72; lock.window.scrollX = 72;
+  lock.fire('scroll', {});
+  lock.fire('win:scroll', {});
+  assert.equal(lock.root.scrollTop, 0, 'a moved root must be reset to the top');
+  assert.equal(lock.root.scrollLeft, 0, 'a moved root must be reset horizontally');
+  assert.equal(lock.window.scrollY, 0, 'a moved window must be reset to the top');
+  assert.equal(lock.window.scrollX, 0, 'a moved window must be reset horizontally');
 });
