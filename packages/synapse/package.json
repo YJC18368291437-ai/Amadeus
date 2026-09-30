@@ -1,0 +1,46 @@
+{
+  "name": "dsh-amadeus-synapse",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Non-linear conversation map (Synapse) as a native Amadeus conversation view.",
+  "main": "dist/index.mjs",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "dist",
+    "app.js",
+    "styles.css",
+    "deepseek-mark.svg",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-file-upload"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YJC18368291437-ai/dsh-synapse-canvas.git"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness"
+  ]
+}
