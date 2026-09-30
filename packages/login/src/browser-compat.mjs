@@ -129,11 +129,24 @@ const NO_CACHE_META = '<meta http-equiv="Cache-Control" content="no-store, no-ca
 function installDocumentScrollLock() {
   const EDITABLE = 'input,textarea,select,[contenteditable]';
   let tracking = false;
+  let selfManaged = false;
   let startX = 0;
   let startY = 0;
 
+  // A surface that declares `touch-action: none` (the panel resize handle does)
+  // manages its own gesture with pointer events. Answering its touchmove with
+  // preventDefault() makes iOS cancel that pointer sequence, so the handle stops
+  // dragging. Leave those gestures alone.
+  const managesOwnGesture = target => {
+    for (let node = target; node && node.nodeType === 1; node = node.parentElement) {
+      if (getComputedStyle(node).touchAction === 'none') return true;
+    }
+    return false;
+  };
+
   document.addEventListener('touchstart', event => {
     tracking = event.touches.length === 1;
+    selfManaged = tracking && managesOwnGesture(event.target);
     if (tracking) {
       startX = event.touches[0].clientX;
       startY = event.touches[0].clientY;
@@ -160,6 +173,7 @@ function installDocumentScrollLock() {
     if (!event.cancelable) return;
     if (event.touches.length > 1) return;
     if (!tracking) { event.preventDefault(); return; }
+    if (selfManaged) return;
     const touch = event.touches[0];
     const dx = touch.clientX - startX;
     const dy = touch.clientY - startY;
@@ -256,13 +270,52 @@ function installWorkerBlobPolyfill(polyfillSource) {
   window.Blob = PatchedBlob;
 }
 
+// A server restart is when new client code ships. An open page must never keep
+// running the old bundle: WebKit hangs onto a stale app shell for days, so an
+// editor fix can silently never reach the iPad. Poll the server build token and
+// reload once (cache-busted) when it changes. The token is mirrored in
+// sessionStorage so the reload can never loop, even if the shell was cached.
+function installBuildWatch(token) {
+  try {
+    if (typeof document === 'undefined' || typeof location === 'undefined' || typeof fetch !== 'function') return;
+    const KEY = 'amadeus.server.token';
+    const store = typeof sessionStorage !== 'undefined' ? sessionStorage : null;
+    const reload = next => {
+      try { if (store) store.setItem(KEY, next); } catch (error) {}
+      const url = new URL(location.href);
+      url.searchParams.set('v', next);
+      location.replace(url.toString());
+    };
+    const check = () => {
+      if (document.hidden) return;
+      fetch('/amadeus/version', { cache: 'no-store', credentials: 'same-origin' })
+        .then(response => (response.ok ? response.json() : null))
+        .then(body => {
+          const next = body && body.token;
+          if (typeof next !== 'string' || !next) return;
+          let seen = null;
+          try { seen = store ? store.getItem(KEY) : null; } catch (error) {}
+          if (seen === null) { try { if (store) store.setItem(KEY, next); } catch (error) {} return; }
+          if (seen !== next) reload(next);
+        })
+        .catch(() => {});
+    };
+    const timer = typeof window !== 'undefined' && typeof window.setInterval === 'function' ? window.setInterval : (typeof setInterval === 'function' ? setInterval : null);
+    if (timer) timer(check, 15000);
+    if (typeof document.addEventListener === 'function') document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('online', check);
+  } catch (error) {}
+}
+
 // HTTP on a public IP has getRandomValues but no randomUUID. Install before
 // dsh's module loader so native APIs and all four plugins see the same API.
-export function injectBrowserCompatibility(html) {
+export function injectBrowserCompatibility(html, token) {
   return html
+    .replace(/assets\/index-Q6zc2uHV\.js/g, 'assets/index-Q6zc2uHV-nolazy1.js')
+    // AMADEUS_LITERAL_KEY_PATCH
     .replace(/<link\b[^>]*rel=["']icon["'][^>]*>/i, '')
     .replace(/<link\b[^>]*rel=["']manifest["'][^>]*>/i, '')
     .replace(/<meta\b[^>]*name=["']viewport["'][^>]*>/i, VIEWPORT_META)
     .replace(/<\/head>/i, head => `${VIEWPORT_LOCK}${head}`)
-    .replace(/<head\b[^>]*>/i, head => `${head}${NO_CACHE_META}${ICON_LINKS}<script>(${installPromiseWithResolvers.toString()})();</script><script>(${installMapGetOrInsert.toString()})();(${installWorkerBlobPolyfill.toString()})(${JSON.stringify('(' + installMapGetOrInsert.toString() + ')();')});</script><script>(${installBrowserCrypto.toString()})();</script><script>(${installIosStandaloneEditableFix.toString()})();</script><script>(${blockNativePageZoom.toString()})();</script><script>(${installDocumentScrollLock.toString()})();</script>`);
+    .replace(/<head\b[^>]*>/i, head => `${head}${NO_CACHE_META}${ICON_LINKS}<script>(${installPromiseWithResolvers.toString()})();</script><script>(${installMapGetOrInsert.toString()})();(${installWorkerBlobPolyfill.toString()})(${JSON.stringify('(' + installMapGetOrInsert.toString() + ')();')});</script><script>(${installBrowserCrypto.toString()})();</script><script>(${installBuildWatch.toString()})(${JSON.stringify(token || '')});</script><script>(${installIosStandaloneEditableFix.toString()})();</script><script>(${blockNativePageZoom.toString()})();</script><script>(${installDocumentScrollLock.toString()})();</script>`);
 }

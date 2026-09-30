@@ -5,6 +5,31 @@ import { injectBrowserCompatibility } from './browser-compat.mjs';
 import { registerPwaRoutes } from './pwa.mjs';
 import { PrefixUpgradeRoutes } from './upgrade-routes.mjs';
 
+// A token that changes on every server start. The client polls it and reloads a
+// cache-busted URL when it changes, so an iPad never keeps running a stale client
+// bundle (and thus never keeps a stale editor) after a deploy or restart.
+const BUILD_TOKEN = `${process.pid}-${Date.now()}`;
+
+// Force HTML (the app shell) to never sit in a browser cache. WebKit otherwise
+// reuses an old shell for days, so new client code — and new cache-busted module
+// URLs — never load. Static assets keep their own caching; only HTML is pinned.
+function noStoreHtml(res) {
+  const original = res.writeHead;
+  res.writeHead = function writeHead(status, reasonOrHeaders, maybeHeaders) {
+    const withReason = typeof reasonOrHeaders === 'string';
+    const headers = withReason ? maybeHeaders : reasonOrHeaders;
+    const existing = this.getHeader('content-type');
+    const contentType = (headers && (headers['content-type'] || headers['Content-Type'])) || existing;
+    let output = headers;
+    if (typeof contentType === 'string' && contentType.toLowerCase().startsWith('text/html')) {
+      output = { ...(headers || {}), 'cache-control': 'no-store, no-cache, must-revalidate, max-age=0', pragma: 'no-cache', expires: '0' };
+    }
+    if (withReason) return original.call(this, status, reasonOrHeaders, output);
+    return output === undefined ? original.call(this, status) : original.call(this, status, output);
+  };
+  return res;
+}
+
 // Substitution is restricted to the webserver composition row; no global dsh files change.
 export default class AmadeusWebServer extends WebServer {
   static Config = z.object({
@@ -23,7 +48,11 @@ export default class AmadeusWebServer extends WebServer {
     // versioned transport and dynamically forwarded extension webview ports.
     this.upgrades = new PrefixUpgradeRoutes(this.upgrades);
     this.auth = auth;
-    ctx.effect(() => this.tapIndex(injectBrowserCompatibility));
+    ctx.effect(() => this.tapIndex(html => injectBrowserCompatibility(html, BUILD_TOKEN)));
+    ctx.effect(() => this.register({ kind: 'exact', path: '/amadeus/version', handler: (req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ token: BUILD_TOKEN }));
+    } }));
     // PWA bootstrap resources must be fetchable before a Basic Auth session is established.
     ctx.effect(() => registerPwaRoutes(route => WebServer.prototype.register.call(this, route)));
     ctx.inject(['connection'], scope => {
@@ -49,7 +78,7 @@ export default class AmadeusWebServer extends WebServer {
   }
   registerFallback(handler) {
     return super.registerFallback((req, res) => {
-      if (this.auth.guard(req, res)) return handler(req, res);
+      if (this.auth.guard(req, res)) return handler(req, noStoreHtml(res));
     });
   }
   registerUpgrade(route) {
