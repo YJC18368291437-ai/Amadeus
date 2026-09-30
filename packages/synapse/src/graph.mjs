@@ -16,9 +16,10 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
 
+// Low-saturation (muted) palette — easier on the eyes than the old vivid set.
 const PROJECT_PALETTE = [
-  '#4f7cff', '#e5563e', '#17a673', '#a855f7', '#e59f0b',
-  '#0e9bb5', '#d946a0', '#6b7f99', '#7c9b2f', '#b45309',
+  '#8aa0c4', '#c0908c', '#7fae97', '#a893c2', '#c2a173',
+  '#7babb4', '#c294ac', '#8b93a3', '#98ab72', '#b3896f',
 ]
 
 const MAX_QUESTIONS = 4

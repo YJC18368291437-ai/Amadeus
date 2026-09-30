@@ -17,6 +17,7 @@
   // cross the lower-priority one is broken with a gap so the higher one reads
   // as passing over it (fork < topic < ai). Toggleable so it can be compared.
   const SOFTEN_KEY = 'dsh-synapse:soften:v1'
+  const COLOR_KEY = 'dsh-synapse:colors:v1'
   const LAYERED_KEY = 'dsh-synapse:layered:v1'
   const ENDPOINT_FADE_PX = 30
   const CROSS_GAP_PX = 18
@@ -85,6 +86,9 @@
     focusId: null,         // focused session id, or null
     raw: null,
     didInitialFit: false,  // auto "全览" once, the first time nodes appear
+    demoOverride: null,    // TEMP: when set, render a synthetic demo graph
+    colorOverrides: {},    // project name -> hex, picked by the user
+    keepIds: null,         // ring to keep after clearing focus (stay in place)
   }
 
   // --------------------------------------------------------------- chrome ---
@@ -123,12 +127,16 @@
   aiButton.append(el('span', { text: 'AI 连线' }))
   const layeredButton = el('button', { class: 'graph-button is-layered', type: 'button', title: '分层：项目折成超级点，点开才展开（像 Obsidian 一样动画）' }, actions)
   layeredButton.append(el('span', { text: '分层' }))
+  // TEMP: toggle a synthetic 6×30 demo graph for evaluating scale.
+  const demoButton = el('button', { class: 'graph-button', type: 'button', title: '加载示例数据：6 个项目 × 每个 30 个对话（临时）' }, actions)
+  demoButton.append(el('span', { text: '示例' }))
   const softenButton = el('button', { class: 'graph-button is-soften', type: 'button', title: '连线柔化：交叉处让下层线断开、端点渐隐' }, actions)
   softenButton.append(el('span', { text: '柔化' }))
   const fitButton = el('button', { class: 'graph-button', type: 'button', title: '缩放到全部对话' }, actions)
   fitButton.append(el('span', { text: '全览' }))
 
   const legend = el('div', { class: 'graph-legend' }, shell)
+  const palettePop = el('div', { class: 'graph-palette', hidden: 'hidden' }, shell)
 
   const svg = document.createElementNS(SVG_NS, 'svg')
   svg.setAttribute('class', 'graph-canvas')
@@ -190,7 +198,50 @@
     }
   }
 
+  // TEMP demo: open the map as `/synapse/?demo=10x30` to render a synthetic
+  // graph of 10 projects × 30 sessions (exercises the ring's 20-item window).
+  const DEMO = (() => {
+    const match = /[?&]demo=(\d+)x(\d+)/.exec(window.location.search)
+    return match === null ? null : { projects: clamp(Number(match[1]), 1, 40), per: clamp(Number(match[2]), 1, 300) }
+  })()
+  const DEMO_PALETTE = ['#8aa0c4', '#c0908c', '#7fae97', '#a893c2', '#c2a173', '#7babb4', '#c294ac', '#8b93a3', '#98ab72', '#b3896f']
+  const buildDemoPayload = (projects, per) => {
+    const nodes = []
+    const edges = []
+    const list = []
+    const now = Date.now()
+    for (let p = 0; p < projects; p += 1) {
+      const name = `科目 ${p + 1}`
+      const color = DEMO_PALETTE[p % DEMO_PALETTE.length]
+      list.push({ name, color })
+      const ids = []
+      for (let k = 0; k < per; k += 1) {
+        const id = `demo-${p}-${k}`
+        const msgs = 4 + ((p * 31 + k * 7) % 180)
+        ids.push(id)
+        nodes.push({
+          id, sessionId: id, threadId: null, title: `${name} 对话 ${k + 1}`, project: name, color,
+          msgs, size: Math.min(16, 4.5 + Math.sqrt(msgs) * 1.6), questions: [], userCount: 2, assistantCount: 2,
+          lastAt: now - (k * 5 + p) * 3600 * 1000, parentId: null,
+        })
+      }
+      for (let k = 0; k + 1 < per; k += 1) edges.push({ source: ids[k], target: ids[k + 1], kind: 'topic', weight: 0.5 })
+      for (let k = 0; k + 5 < per; k += 7) edges.push({ source: ids[k], target: ids[k + 5], kind: 'fork', weight: 1 })
+    }
+    for (let p = 0; p < projects; p += 1) {
+      edges.push({ source: `demo-${p}-0`, target: `demo-${(p + 3) % projects}-2`, kind: 'ai', weight: 0.85, reason: '同一主题' })
+    }
+    return {
+      nodes, edges, projects: list,
+      meta: { nodeCount: nodes.length, edgeCount: edges.length, source: 'ai', model: 'demo', aiEnabled: true, fingerprint: `demo-${projects}x${per}`, generatedAt: Date.now() },
+    }
+  }
+
   const fetchGraph = async ({ refresh = false } = {}) => {
+    if (state.demoOverride !== null) {
+      applyGraph(buildDemoPayload(state.demoOverride.projects, state.demoOverride.per), { rearrange: refresh })
+      return true
+    }
     try {
       const response = await fetch(refresh ? `${GRAPH_URL}?refresh=1` : GRAPH_URL, { method: refresh ? 'POST' : 'GET' })
       if (!response.ok) throw new Error(String(response.status))
@@ -212,7 +263,8 @@
 
   const byTimeDesc = list => list.slice().sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0))
   const projectMembers = name => byTimeDesc(state.raw.nodes.filter(node => node.project === name))
-  const colorOfProject = name => (state.projects.find(project => project.name === name)?.color) ?? '#64748b'
+  const colorOfProject = name => state.colorOverrides[name] ?? (state.projects.find(project => project.name === name)?.color) ?? '#64748b'
+  const saveColors = () => { try { localStorage.setItem(COLOR_KEY, JSON.stringify(state.colorOverrides)) } catch { /* private mode */ } }
   const baseGroupSize = name => 34 + Math.sqrt(projectMembers(name).length) * 6
 
   const adjacency = () => {
@@ -300,7 +352,7 @@
       const a = pos.get(edge.source)
       const b = pos.get(edge.target)
       if (a === undefined || b === undefined) { edge.bow = 0; continue }
-      if (edge.kind === 'aggregate') { edge.bow = 0; routed.push(curveSample(a, b, 0)); continue }
+      if (edge.radial === true) { edge.bow = 0; routed.push(curveSample(a, b, 0)); continue }
       const cw = routed.reduce((sum, q) => sum + polyCross(curveSample(a, b, 1), q), 0)
       const ccw = routed.reduce((sum, q) => sum + polyCross(curveSample(a, b, -1), q), 0)
       edge.bow = ccw < cw ? -1 : 1
@@ -329,7 +381,7 @@
     return anchors
   }
 
-  const groupNode = (name, { dim = false } = {}) => {
+  const groupNode = (name, { dim = false, scale = 1 } = {}) => {
     const members = projectMembers(name)
     return {
       id: `group:${name}`,
@@ -339,7 +391,7 @@
       color: colorOfProject(name),
       count: members.length,
       msgs: members.reduce((sum, node) => sum + node.msgs, 0),
-      size: baseGroupSize(name),
+      size: baseGroupSize(name) * scale,
       sessionId: null,
       dim,
     }
@@ -356,12 +408,17 @@
     // Which sessions of the expanded project sit on the ring.
     let displayed = []
     let newestId = null
+    const focusing = focusNode !== null && focusNode.project === expanded
     if (expanded !== null) {
       const members = projectMembers(expanded)
       newestId = members[0]?.id ?? null
-      if (focusNode !== null && focusNode.project === expanded) {
+      if (focusing) {
         displayed = [state.focusId, ...relatedInProject(state.focusId)].map(id => rawById.get(id)).filter(Boolean)
-      } else {
+      } else if (state.keepIds !== null) {
+        // Just cleared focus: keep the very same ring (and thus positions).
+        displayed = state.keepIds.map(id => rawById.get(id)).filter(node => node !== undefined && node.project === expanded)
+      }
+      if (!focusing && displayed.length === 0) {
         const n = members.length
         const start = n === 0 ? 0 : ((state.rotation % n) + n) % n
         for (let i = 0; i < Math.min(RING_MAX, n); i += 1) displayed.push(members[(start + i) % n])
@@ -393,7 +450,8 @@
         nodes.push(node)
       }
     } else {
-      const hub = groupNode(expanded)
+      // The selected (expanded) super node grows to 1.3× its normal size.
+      const hub = groupNode(expanded, { scale: 1.3 })
       hub.tx = 0
       hub.ty = 0
       hub.isHub = true
@@ -446,20 +504,9 @@
       }
       for (const edge of agg.values()) edges.push(edge)
     } else {
-      const agg = new Map()
-      for (const edge of raw.edges) {
-        const a = rawById.get(edge.source)
-        const b = rawById.get(edge.target)
-        if (a === undefined || b === undefined || a.project === b.project) continue
-        const other = a.project === expanded ? b.project : (b.project === expanded ? a.project : null)
-        if (other === null) continue
-        agg.set(other, (agg.get(other) ?? 0) + 1)
-      }
-      for (const [other, count] of agg) {
-        edges.push({ source: `group:${expanded}`, target: `group:${other}`, kind: 'aggregate', count, weight: Math.min(1, 0.15 + Math.log2(count + 1) / 4) })
-      }
-      // Only the selected (top-slot / focused) session shows its lines; the ring
-      // stays otherwise line-free so it never turns into a web.
+      // While a super node is expanded, no aggregate lines between super nodes.
+      // Only the selected (top-slot / focused) session shows its own lines, so
+      // the ring never turns into a web.
       const shown = new Set(displayed.map(node => node.id))
       const activeId = displayed[0]?.id ?? null
       if (activeId !== null) {
@@ -491,12 +538,13 @@
     state.hasFocus = view.hasFocus ?? false
     state.topSlotId = view.topSlotId ?? null
     state.nodes = view.nodes.map(node => {
+      const color = colorOfProject(node.project)
       const old = previous.get(node.id)
-      if (old !== undefined) return { ...node, x: old.x, y: old.y, vx: 0, vy: 0, pinned: false }
+      if (old !== undefined) return { ...node, color, x: old.x, y: old.y, vx: 0, vy: 0, pinned: false }
       // A brand new node emerges from where its project's super node was.
       const seed = previous.get(`group:${node.project}`)
       const base = seed !== undefined ? seed : { x: node.tx, y: node.ty }
-      return { ...node, x: base.x, y: base.y, vx: 0, vy: 0, pinned: false }
+      return { ...node, color, x: base.x, y: base.y, vx: 0, vy: 0, pinned: false }
     })
     state.edges = view.edges
     buildIndex()
@@ -515,6 +563,7 @@
     state.expanded = name
     state.rotation = 0
     state.focusId = focus
+    state.keepIds = null
     refreshLayout({ animate: true })
     if (name !== null) centerOnCluster()
     else state.fitPending = true
@@ -532,20 +581,32 @@
     state.expanded = node.project
     state.focusId = id
     state.rotation = 0
+    state.keepIds = null
     refreshLayout({ animate: true })
   }
 
+  // Clearing focus must NOT reset the view: keep the current ring (and all node
+  // positions) as-is, just drop the revealed dots / focus highlight and put the
+  // selection box back on the (previously focused) session.
   const clearFocus = () => {
     if (state.focusId === null) return
+    // Point the rotation cursor at the focused session's place in time order, so
+    // that rotating afterwards continues from here instead of jumping to newest.
+    const node = rawById.get(state.focusId)
+    if (node !== undefined) {
+      const index = projectMembers(node.project).findIndex(member => member.id === state.focusId)
+      if (index >= 0) state.rotation = index
+    }
+    state.keepIds = state.nodes.filter(item => item.onRing === true).map(item => item.id)
     state.focusId = null
     refreshLayout({ animate: true })
-    state.fitPending = true
   }
 
   const rotateSelection = step => {
     if (!state.layered || state.expanded === null || state.focusId !== null) return
     const total = projectMembers(state.expanded).length
     if (total === 0) return
+    state.keepIds = null
     state.rotation = (((state.rotation + step) % total) + total) % total
     refreshLayout()
   }
@@ -575,6 +636,7 @@
         if (node !== undefined) {
           state.expanded = node.project
           state.focusId = node.id
+          state.keepIds = null
         }
       }
       refreshLayout({ animate: rearrange })
@@ -583,6 +645,7 @@
       const previous = new Map(state.nodes.map(node => [node.id, node]))
       state.nodes = state.raw.nodes.map(node => ({
         ...node,
+        color: colorOfProject(node.project),
         x: previous.get(node.id)?.x ?? 0,
         y: previous.get(node.id)?.y ?? 0,
         vx: previous.get(node.id)?.vx ?? 0,
@@ -1274,13 +1337,18 @@
     for (const project of state.projects) {
       const source = state.layered && state.raw !== null ? state.raw.nodes : state.nodes
       const count = source.filter(node => node.project === project.name).length
-      const chip = el('button', { class: 'graph-chip', type: 'button', title: `只看/隐藏「${project.name}」` }, legend)
-      const marker = el('span', { class: 'graph-chip-dot' }, chip)
-      marker.style.background = project.color
-      chip.append(el('span', { class: 'graph-chip-name', text: project.name }))
-      chip.append(el('span', { class: 'graph-chip-count', text: String(count) }))
+      const color = colorOfProject(project.name)
+      const chip = el('div', { class: 'graph-chip' }, legend)
+      chip.dataset.project = project.name
       chip.classList.toggle('is-off', state.hiddenProjects.has(project.name))
-      chip.addEventListener('click', () => {
+      // Swatch button opens a small palette (preset low-sat colours + custom).
+      const dot = el('button', { class: 'graph-chip-dot', type: 'button', title: `给「${project.name}」选颜色` }, chip)
+      dot.style.background = color
+      dot.addEventListener('click', event => { event.stopPropagation(); openPalette(project.name, dot) })
+      const toggle = el('button', { class: 'graph-chip-label', type: 'button', title: `只看/隐藏「${project.name}」` }, chip)
+      toggle.append(el('span', { class: 'graph-chip-name', text: project.name }))
+      toggle.append(el('span', { class: 'graph-chip-count', text: String(count) }))
+      toggle.addEventListener('click', () => {
         if (state.hiddenProjects.has(project.name)) state.hiddenProjects.delete(project.name)
         else state.hiddenProjects.add(project.name)
         renderLegend()
@@ -1288,6 +1356,56 @@
         updateEmphasis()
       })
     }
+  }
+
+  // -------------------------------------------------------------- palette ---
+
+  const PRESET_COLORS = [
+    '#8aa0c4', '#7fae97', '#a893c2', '#c2a173', '#c0908c', '#7babb4',
+    '#c294ac', '#8b93a3', '#98ab72', '#b3896f', '#7d9e8a', '#b0a06a',
+    '#9a8fb0', '#c79a86', '#6f9fae', '#a0a86f', '#bd8f9e', '#9299a8',
+  ]
+  const setProjectColor = (name, hex) => {
+    state.colorOverrides[name] = hex
+    saveColors()
+    for (const node of state.nodes) node.color = colorOfProject(node.project)
+    paintPositions()
+    for (const chip of legend.querySelectorAll('.graph-chip')) {
+      if (chip.dataset.project === name) {
+        const dot = chip.querySelector('.graph-chip-dot')
+        if (dot !== null) dot.style.background = colorOfProject(name)
+      }
+    }
+  }
+  const closePalette = () => { palettePop.hidden = true }
+
+  const openPalette = (name, anchor) => {
+    palettePop.textContent = ''
+    for (const hex of PRESET_COLORS) {
+      const swatch = el('button', { class: 'graph-swatch', type: 'button', title: hex }, palettePop)
+      swatch.style.background = hex
+      swatch.addEventListener('click', () => { setProjectColor(name, hex); closePalette() })
+    }
+    const custom = el('label', { class: 'graph-swatch graph-swatch-custom', title: '自定义颜色…' }, palettePop)
+    custom.append(el('span', { text: '＋' }))
+    const input = el('input', { type: 'color', class: 'graph-palette-input' }, custom)
+    const current = colorOfProject(name)
+    input.value = /^#[0-9a-f]{6}$/i.test(current) ? current : '#888888'
+    input.addEventListener('input', () => setProjectColor(name, input.value))
+    const reset = el('button', { class: 'graph-swatch graph-swatch-reset', type: 'button', title: '恢复默认色' }, palettePop)
+    reset.append(el('span', { text: '↺' }))
+    reset.addEventListener('click', () => { delete state.colorOverrides[name]; saveColors(); setProjectColor(name, colorOfProject(name)); closePalette() })
+
+    const shellRect = shell.getBoundingClientRect()
+    const rect = anchor.getBoundingClientRect()
+    palettePop.hidden = false
+    const width = palettePop.offsetWidth
+    const height = palettePop.offsetHeight
+    const left = clamp(rect.left - shellRect.left, 8, shellRect.width - width - 8)
+    let top = rect.top - shellRect.top - height - 8
+    if (top < 8) top = rect.bottom - shellRect.top + 8
+    palettePop.style.left = `${left}px`
+    palettePop.style.top = `${top}px`
   }
 
   const updateStatus = () => {
@@ -1416,15 +1534,9 @@
   svg.addEventListener('touchcancel', endPinch, { passive: true })
 
   svg.addEventListener('wheel', event => {
-    // Over an expanded ring, the wheel rotates the selection instead of zooming.
-    if (state.layered && state.expanded !== null && state.focusId === null && event.ctrlKey !== true) {
-      const world = screenToWorld(localPoint(event))
-      if (Math.hypot(world.x, world.y) <= state.ringRadius + 170) {
-        event.preventDefault()
-        rotateSelection(event.deltaY > 0 ? 1 : -1)
-        return
-      }
-    }
+    // The wheel only zooms; ring rotation is done with the Up/Down arrow keys
+    // (a Magic-Keyboard trackpad's two-finger scroll fires wheel events, and we
+    // don't want it to spin the ring).
     event.preventDefault()
     const point = localPoint(event)
     const factor = Math.exp((event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY) * -0.0016)
@@ -1567,9 +1679,28 @@
     state.expanded = null
     state.focusId = null
     state.rotation = 0
+    state.keepIds = null
     if (!state.layered) { state.seeded = false; seedPositions(); reheat() }
     refreshLayout({ animate: true })
     say(state.layered ? '分层视图：开（项目折成超级点）' : '分层视图：关（显示全部对话）')
+  })
+
+  const refreshDemoButton = () => {
+    const on = state.demoOverride !== null
+    demoButton.classList.toggle('is-off', !on)
+    demoButton.querySelector('span').textContent = on ? '退出示例' : '示例'
+  }
+  demoButton.addEventListener('click', () => {
+    const off = state.demoOverride !== null
+    state.demoOverride = off ? null : { projects: 6, per: 30 }
+    state.expanded = null
+    state.focusId = null
+    state.rotation = 0
+    state.keepIds = null
+    state.didInitialFit = false
+    refreshDemoButton()
+    void fetchGraph()
+    say(off ? '已回到真实数据' : '示例数据：6 个项目 × 每个 30 个对话')
   })
 
   aiButton.addEventListener('click', async () => {
@@ -1595,16 +1726,13 @@
           return
         }
       }
-      if (event.key === 'Enter' && state.focusId === null && state.topSlotId !== null) {
+      // Enter focuses the selected session; pressing it again clears focus.
+      if (event.key === 'Enter') {
         event.preventDefault()
-        focusSession(state.topSlotId)
+        if (state.focusId !== null) clearFocus()
+        else if (state.topSlotId !== null) focusSession(state.topSlotId)
         return
       }
-    }
-    if (event.key === 'Tab' && state.layered && state.focusId !== null) {
-      event.preventDefault()
-      clearFocus()
-      return
     }
     if (event.key === '/' && document.activeElement !== searchInput) {
       event.preventDefault()
@@ -1613,13 +1741,27 @@
     }
     if (event.key === 'Escape') {
       if (state.layered && state.focusId !== null) clearFocus()
+      closePalette()
       hideTooltip()
     }
   })
 
+  document.addEventListener('pointerdown', event => {
+    if (palettePop.hidden) return
+    if (palettePop.contains(event.target)) return
+    const dot = event.target.closest?.('.graph-chip-dot')
+    if (dot !== null && dot !== undefined) return
+    closePalette()
+  }, true)
+
   window.addEventListener('resize', () => {
     state.width = shell.clientWidth
     state.height = shell.clientHeight
+    // Desktop windows get resized a lot — keep the map centred.
+    if (state.layered && state.nodes.length > 0) {
+      if (state.expanded !== null) centerOnCluster()
+      else { state.fitPending = true; startLoop() }
+    }
     paintPositions()
   })
 
@@ -1667,9 +1809,13 @@
       if (saved === '0') state.soften = false
       const savedLayered = localStorage.getItem(LAYERED_KEY)
       if (savedLayered === '0') state.layered = false
+      const savedColors = localStorage.getItem(COLOR_KEY)
+      if (savedColors !== null) state.colorOverrides = JSON.parse(savedColors) ?? {}
     } catch { /* private mode */ }
+    if (DEMO !== null) state.demoOverride = { projects: DEMO.projects, per: DEMO.per }
     refreshSoftenButton()
     refreshLayeredButton()
+    refreshDemoButton()
     if (window.matchMedia?.('(prefers-color-scheme: dark)').matches === true) {
       state.theme = 'dark'
       document.documentElement.dataset.theme = 'dark'
