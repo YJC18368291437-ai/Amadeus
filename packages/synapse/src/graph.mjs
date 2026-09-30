@@ -135,6 +135,10 @@ export function sessionFacts(session) {
     ? header.cwd
     : (typeof header.meta?.cwd === 'string' ? header.meta.cwd : null)
   const parentId = typeof header.parentSession === 'string' ? header.parentSession : null
+  // Subagent sessions (DSH delegation children) are execution detail behind a
+  // user turn, not conversations the user talks to. DSH marks them with
+  // `origin: "subagent"`; the map must never show them.
+  const subagent = header.origin === 'subagent'
   let title = typeof session.title === 'string' && session.title.trim() !== '' ? session.title.trim() : null
   const questions = []
   let userCount = 0
@@ -153,8 +157,17 @@ export function sessionFacts(session) {
     }
     if (event.type === 'assistant/message') assistantCount += 1
   }
-  return { id, sessionId: id, cwd, project: projectOf(cwd), parentId, title, questions, userCount, assistantCount, events: events.length, createdAt: createdAt ?? lastAt ?? null, lastAt: lastAt ?? null }
+  return { id, sessionId: id, cwd, project: projectOf(cwd), parentId, subagent, title, questions, userCount, assistantCount, events: events.length, createdAt: createdAt ?? lastAt ?? null, lastAt: lastAt ?? null }
 }
+
+/**
+ * A projected store thread is a subagent when it was flagged at projection time,
+ * or — for data written before that flag existed — when its DSH session id
+ * lacks the `session-` prefix every user-facing session id carries.
+ */
+const isSubagentThread = thread =>
+  thread?.subagent === true
+  || (typeof thread?.dshSessionId === 'string' && thread.dshSessionId !== '' && !thread.dshSessionId.startsWith('session-'))
 
 /**
  * Merge live session facts with the projected store so a session that has not
@@ -165,7 +178,7 @@ export function collectNodes(sessions, store) {
   const facts = []
   for (const session of sessions) {
     const fact = sessionFacts(session)
-    if (fact !== null) facts.push(fact)
+    if (fact !== null && !fact.subagent) facts.push(fact)
   }
   const factById = new Map(facts.map(fact => [fact.sessionId, fact]))
   const projectColors = new Map()
@@ -202,6 +215,7 @@ export function collectNodes(sessions, store) {
   }
   for (const workspace of store?.state?.workspaces ?? []) {
     for (const thread of workspace.threads ?? []) {
+      if (isSubagentThread(thread)) continue
       const sessionId = typeof thread.dshSessionId === 'string' ? thread.dshSessionId : null
       if (sessionId === null) continue
       const fact = factById.get(sessionId) ?? null
@@ -457,11 +471,14 @@ export class GraphService {
       await this.aiCacheWrite({ ids: [...idSet], model, generatedAt: Date.now(), edges: related })
     } else {
       // Plain load: only show the last manual result, never ask the provider.
+      // Drop links that name a node which is gone now (e.g. a removed subagent
+      // session) instead of discarding the whole cached set over one stale link.
       const cached = await this.aiCacheRead()
-      const usable = cached !== null && Array.isArray(cached.edges)
-        && cached.edges.every(edge => idSet.has(edge.source) && idSet.has(edge.target))
-      if (usable) {
-        edges = mergeEdges(lineage, cached.edges)
+      const cachedEdges = cached !== null && Array.isArray(cached.edges)
+        ? cached.edges.filter(edge => idSet.has(edge.source) && idSet.has(edge.target))
+        : []
+      if (cachedEdges.length > 0) {
+        edges = mergeEdges(lineage, cachedEdges)
         source = 'ai-cached'
         model = cached.model ?? null
       }

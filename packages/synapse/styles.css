@@ -70,6 +70,7 @@ html, body {
 
 /* ------------------------------------------------------------- links ---- */
 
+.graph-glow { stroke-linecap: round; pointer-events: none; }
 .graph-link { stroke: var(--link); stroke-linecap: round; }
 .graph-link-fork { stroke: rgba(120, 132, 150, 0.7); }
 .graph-link-ai { stroke-dasharray: 4 4; }
@@ -95,12 +96,25 @@ html[data-theme="dark"] .graph-link-fork { stroke: rgba(170, 178, 192, 0.55); }
   stroke-width: 1;
   transition: opacity 120ms ease;
 }
+.graph-node-newest {
+  fill-opacity: 0.24;
+  stroke: none;
+  pointer-events: none;
+}
+.graph-ring-box {
+  fill: none;
+  stroke: var(--accent);
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
+.graph-node.is-faded { opacity: 0.32; }
+.graph-node.is-focused .graph-node-halo { stroke: var(--accent); stroke-width: 3; }
 html[data-theme="dark"] .graph-node-dot { stroke: rgba(28, 28, 30, 0.9); }
 .graph-node.is-dim .graph-node-dot { opacity: 0.18; }
 .graph-node.is-dim .graph-node-label { opacity: 0.12; }
 .graph-node-label {
   fill: var(--fg-muted);
-  pointer-events: none;
+  cursor: pointer;
   paint-order: stroke;
   stroke: var(--bg);
   stroke-width: 3px;
@@ -257,6 +271,7 @@ html[data-theme="dark"] .graph-node-dot { stroke: rgba(28, 28, 30, 0.9); }
 .graph-button:active { transform: translateY(1px); }
 .graph-button.is-busy { opacity: 0.6; cursor: progress; }
 .graph-button[hidden] { display: none; }
+.graph-button.is-soften.is-off { opacity: 0.5; }
 
 /* ------------------------------------------------------------ legend ---- */
 

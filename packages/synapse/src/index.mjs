@@ -200,6 +200,7 @@ export class WorkspaceStore {
   async projectSession(session, replayFrom = 0, workspaceTitle = 'DSH 任务') {
     return this.mutate(() => {
       if (this.state.hiddenSessionIds.includes(session.id)) return null
+      if (isSubagentSession(session)) return null
       const workspace = this.dshWorkspace(sessionCwd(session), workspaceTitle)
       const thread = this.dshThread(workspace, session)
       for (const event of session.snapshotEvents()) {
@@ -213,6 +214,7 @@ export class WorkspaceStore {
   async projectEvent(session, event, workspaceTitle = 'DSH 任务') {
     return this.mutate(() => {
       if (this.state.hiddenSessionIds.includes(session.id)) return null
+      if (isSubagentSession(session)) return null
       const workspace = this.dshWorkspace(sessionCwd(session), workspaceTitle)
       const thread = this.dshThread(workspace, session)
       this.projectEventInto(workspace, thread, event)
@@ -225,6 +227,7 @@ export class WorkspaceStore {
     if (events.length === 0) return null
     return this.mutate(() => {
       if (this.state.hiddenSessionIds.includes(session.id)) return null
+      if (isSubagentSession(session)) return null
       const workspace = this.dshWorkspace(sessionCwd(session), workspaceTitle)
       const thread = this.dshThread(workspace, session)
       for (const event of events) this.projectEventInto(workspace, thread, event)
@@ -386,6 +389,7 @@ export class WorkspaceStore {
       // session has been restored, when its in-process `firstLiveSeq` moves.
       const seedLength = session.header?.seedLength
       if (Number.isSafeInteger(seedLength) && seedLength >= 0) thread.sourceSeedLength = seedLength
+      thread.subagent = isSubagentSession(session)
       return thread
     }
     const parentSessionId = typeof session.header?.parentSession === 'string' ? session.header.parentSession : null
@@ -397,6 +401,7 @@ export class WorkspaceStore {
       title: typeof session.title === 'string' && session.title.trim() !== '' ? session.title.slice(0, MAX_TITLE_LENGTH) : (parent === undefined ? 'DSH 会话' : `${parent.title} 分支`),
       parentId: parent?.id ?? null,
       sourceParentSessionId: parentSessionId,
+      subagent: isSubagentSession(session),
       sourceSeedLength: Number.isSafeInteger(session.header?.seedLength) && session.header.seedLength >= 0 ? session.header.seedLength : null,
       dshSessionId: session.id,
       dshSessionTitle: typeof session.title === 'string' ? session.title.slice(0, MAX_TITLE_LENGTH) : null,
@@ -712,6 +717,12 @@ function sessionCwd(session) {
   return typeof cwd === 'string' && cwd.trim() !== '' ? cwd : '未指定工作目录'
 }
 
+// DSH delegation children carry `origin: "subagent"`. Synapse only projects
+// user-facing sessions, so a subagent never becomes a node on the map.
+function isSubagentSession(session) {
+  return session?.header?.origin === 'subagent'
+}
+
 function workspaceTitle(cwd, fallbackTitle) {
   if (cwd === '未指定工作目录') return fallbackTitle
   const segment = cwd.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1)
@@ -817,6 +828,7 @@ export function apply(ctx, config) {
     ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
   }
   const replaySession = session => {
+    if (isSubagentSession(session)) return
     // Forks inherit their parent's log. The canvas already represents that
     // history through the parent node, so only project the child's live tail.
     const replayFrom = session.header?.parentSession === undefined ? 0 : session.firstLiveSeq
@@ -827,6 +839,7 @@ export function apply(ctx, config) {
   const projectionQueue = []
   let projectionScheduled = false
   const enqueueProjection = (session, event) => {
+    if (isSubagentSession(session)) return
     projectionQueue.push({ session, event })
     if (projectionScheduled) return
     projectionScheduled = true

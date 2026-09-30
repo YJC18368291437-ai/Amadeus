@@ -10,6 +10,9 @@ const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif
 
 // While the map view is mounted, hide DSH's native chat composer so the canvas
 // fills the whole conversation area (the map has its own per-card composer).
+// Also hide DSH's conversation width drag handles: the hover-only 2px vertical
+// bars that sit left/right of the chat column and resize its width. They overlay
+// the canvas and are easy to grab by accident in the map, where they do nothing.
 const SYNAPSE_ACTIVE_ATTR = 'data-amadeus-synapse-active';
 const COMPOSER_HIDE_STYLE_ID = 'amadeus-synapse-hide-composer';
 
@@ -17,7 +20,8 @@ const ensureComposerHideStyle = () => {
   if (typeof document === 'undefined' || document.getElementById(COMPOSER_HIDE_STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = COMPOSER_HIDE_STYLE_ID;
-  style.textContent = `html[${SYNAPSE_ACTIVE_ATTR}] [data-conversation-region="composer"]{display:none!important}`;
+  style.textContent = `html[${SYNAPSE_ACTIVE_ATTR}] [data-conversation-region="composer"]{display:none!important}`
+    + `html[${SYNAPSE_ACTIVE_ATTR}] [class*="widthHandle"]{display:none!important}`;
   (document.head || document.documentElement).append(style);
 };
 

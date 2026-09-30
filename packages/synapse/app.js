@@ -13,6 +13,25 @@
   const GRAPH_URL = '/synapse/api/graph'
   const REFRESH_INTERVAL_MS = 30_000
 
+  // Link softening: a link fades out as it meets a dot, and where two links
+  // cross the lower-priority one is broken with a gap so the higher one reads
+  // as passing over it (fork < topic < ai). Toggleable so it can be compared.
+  const SOFTEN_KEY = 'dsh-synapse:soften:v1'
+  const LAYERED_KEY = 'dsh-synapse:layered:v1'
+  const ENDPOINT_FADE_PX = 30
+  const CROSS_GAP_PX = 18
+  const GLOW_WIDTH_FACTOR = 3.4
+  const GLOW_OPACITY = 0.16
+  const EDGE_KIND_RANK = { fork: 0, topic: 1, ai: 2 }
+  const LINK_COLORS = {
+    light: { topic: 'rgb(100,116,139)', fork: 'rgb(120,132,150)', hot: 'rgb(79,124,255)' },
+    dark: { topic: 'rgb(160,168,180)', fork: 'rgb(170,178,192)', hot: 'rgb(120,160,255)' },
+  }
+  const LINK_ALPHA = {
+    light: { topic: 0.45, fork: 0.7, hot: 0.9 },
+    dark: { topic: 0.34, fork: 0.55, hot: 0.9 },
+  }
+
   const el = (tag, attrs = {}, parent = null) => {
     const node = document.createElement(tag)
     for (const [key, value] of Object.entries(attrs)) {
@@ -53,6 +72,19 @@
     suppressClickTimer: null,
     hovered: null,
     theme: 'light',
+    soften: true,
+    edgeViews: [],
+    // Layered mode ("分层聚合 · 渐进披露"): projects collapse into super nodes.
+    // Expanding one lays its sessions on a ring (time order, selectable) around
+    // a shrunk super node; clicking a session focuses it and reveals its related
+    // sessions on small rings in other projects. Positions are computed and the
+    // view eases toward them (Obsidian-like motion, not free force).
+    layered: true,
+    expanded: null,        // name of the single expanded project, or null
+    rotation: 0,           // which session sits in the top selection slot
+    focusId: null,         // focused session id, or null
+    raw: null,
+    didInitialFit: false,  // auto "全览" once, the first time nodes appear
   }
 
   // --------------------------------------------------------------- chrome ---
@@ -89,6 +121,10 @@
   arrangeButton.append(el('span', { text: '重排' }))
   const aiButton = el('button', { class: 'graph-button', type: 'button', title: '让 AI 判断关系并连线' }, actions)
   aiButton.append(el('span', { text: 'AI 连线' }))
+  const layeredButton = el('button', { class: 'graph-button is-layered', type: 'button', title: '分层：项目折成超级点，点开才展开（像 Obsidian 一样动画）' }, actions)
+  layeredButton.append(el('span', { text: '分层' }))
+  const softenButton = el('button', { class: 'graph-button is-soften', type: 'button', title: '连线柔化：交叉处让下层线断开、端点渐隐' }, actions)
+  softenButton.append(el('span', { text: '柔化' }))
   const fitButton = el('button', { class: 'graph-button', type: 'button', title: '缩放到全部对话' }, actions)
   fitButton.append(el('span', { text: '全览' }))
 
@@ -97,14 +133,20 @@
   const svg = document.createElementNS(SVG_NS, 'svg')
   svg.setAttribute('class', 'graph-canvas')
   shell.appendChild(svg)
-  const defs = el('defs', {}, svg)
-  void defs
+  const defs = document.createElementNS(SVG_NS, 'defs')
+  svg.appendChild(defs)
   const viewport = document.createElementNS(SVG_NS, 'g')
   viewport.setAttribute('class', 'graph-viewport')
   svg.appendChild(viewport)
+  const glowLayer = document.createElementNS(SVG_NS, 'g')
+  glowLayer.setAttribute('class', 'graph-glows')
+  viewport.appendChild(glowLayer)
   const linkLayer = document.createElementNS(SVG_NS, 'g')
   linkLayer.setAttribute('class', 'graph-links')
   viewport.appendChild(linkLayer)
+  const boxLayer = document.createElementNS(SVG_NS, 'g')
+  boxLayer.setAttribute('class', 'graph-boxes')
+  viewport.appendChild(boxLayer)
   const nodeLayer = document.createElementNS(SVG_NS, 'g')
   nodeLayer.setAttribute('class', 'graph-nodes')
   viewport.appendChild(nodeLayer)
@@ -160,43 +202,404 @@
     }
   }
 
-  const applyGraph = (payload, { rearrange = false } = {}) => {
-    const changed = payload.nodes.length !== state.nodes.length
-      || payload.edges.length !== state.edges.length
-      || payload.meta?.fingerprint !== state.meta?.fingerprint
-    state.projects = Array.isArray(payload.projects) ? payload.projects : []
-    state.meta = payload.meta ?? {}
-    const previous = new Map(state.nodes.map(node => [node.id, node]))
-    state.nodes = payload.nodes.map(node => {
-      const old = previous.get(node.id)
-      return {
-        ...node,
-        x: old?.x ?? 0,
-        y: old?.y ?? 0,
-        vx: old?.vx ?? 0,
-        vy: old?.vy ?? 0,
-        pinned: old?.pinned ?? false,
+  // ---------------------------------------------------- layered view graph ---
+
+  // -------------------------------------------------- layered ring layout ---
+
+  const rawById = new Map()
+  const RING_MAX = 20
+  const RELATED_MAX = 19
+
+  const byTimeDesc = list => list.slice().sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0))
+  const projectMembers = name => byTimeDesc(state.raw.nodes.filter(node => node.project === name))
+  const colorOfProject = name => (state.projects.find(project => project.name === name)?.color) ?? '#64748b'
+  const baseGroupSize = name => 34 + Math.sqrt(projectMembers(name).length) * 6
+
+  const adjacency = () => {
+    if (state.adjFor === state.raw && state.adj !== undefined) return state.adj
+    const adj = new Map(state.raw.nodes.map(node => [node.id, new Set()]))
+    for (const edge of state.raw.edges) {
+      adj.get(edge.source)?.add(edge.target)
+      adj.get(edge.target)?.add(edge.source)
+    }
+    state.adjFor = state.raw
+    state.adj = adj
+    return adj
+  }
+
+  /** Sessions in the same project most related to `id` (direct edge, then degree). */
+  const relatedInProject = id => {
+    const node = rawById.get(id)
+    if (node === undefined) return []
+    const adj = adjacency()
+    const direct = new Map()
+    for (const edge of state.raw.edges) {
+      if (edge.source === id) direct.set(edge.target, Math.max(direct.get(edge.target) ?? 0, edge.weight ?? 0.5))
+      else if (edge.target === id) direct.set(edge.source, Math.max(direct.get(edge.source) ?? 0, edge.weight ?? 0.5))
+    }
+    return state.raw.nodes
+      .filter(other => other.project === node.project && other.id !== id)
+      .map(other => ({ id: other.id, score: (direct.has(other.id) ? 100 + direct.get(other.id) * 50 : 0) + (adj.get(other.id)?.size ?? 0) }))
+      .filter(hit => hit.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, RELATED_MAX)
+      .map(hit => hit.id)
+  }
+
+  const edgeKindBetween = (a, b) => {
+    const edge = state.raw.edges.find(item => (item.source === a && item.target === b) || (item.source === b && item.target === a))
+    return edge === undefined ? 'topic' : edge.kind
+  }
+
+  // Curve routing: bend every non-aggregate link into an arc and greedily pick
+  // the bend direction that crosses the fewest already-routed links, so lines
+  // stop sitting on top of each other and crossings are reduced.
+  const CURVE_BOW = 0.16
+  const curveSample = (a, b, bow) => {
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len = Math.hypot(dx, dy) || 1
+    const m = bow * CURVE_BOW * len
+    const cx = (a.x + b.x) / 2 + (-dy / len) * m
+    const cy = (a.y + b.y) / 2 + (dx / len) * m
+    const pts = []
+    for (let i = 0; i <= 6; i += 1) {
+      const t = i / 6
+      const u = 1 - t
+      pts.push({ x: u * u * a.x + 2 * u * t * cx + t * t * b.x, y: u * u * a.y + 2 * u * t * cy + t * t * b.y })
+    }
+    return pts
+  }
+  const curvePath = (a, b, bow) => {
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len = Math.hypot(dx, dy) || 1
+    const m = bow * CURVE_BOW * len
+    const cx = (a.x + b.x) / 2 + (-dy / len) * m
+    const cy = (a.y + b.y) / 2 + (dx / len) * m
+    return `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${b.x.toFixed(2)} ${b.y.toFixed(2)}`
+  }
+  const segsProperCross = (p1, p2, p3, p4) => {
+    const d = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+    const d1 = d(p3, p4, p1), d2 = d(p3, p4, p2), d3 = d(p1, p2, p3), d4 = d(p1, p2, p4)
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+  }
+  const polyCross = (p, q) => {
+    let count = 0
+    for (let i = 0; i + 1 < p.length; i += 1) {
+      for (let j = 0; j + 1 < q.length; j += 1) {
+        if (segsProperCross(p[i], p[i + 1], q[j], q[j + 1])) count += 1
       }
+    }
+    return count
+  }
+  const routeEdges = (nodes, edges) => {
+    const pos = new Map(nodes.map(node => [node.id, { x: node.tx ?? node.x ?? 0, y: node.ty ?? node.y ?? 0 }]))
+    const routed = []
+    for (const edge of edges) {
+      const a = pos.get(edge.source)
+      const b = pos.get(edge.target)
+      if (a === undefined || b === undefined) { edge.bow = 0; continue }
+      if (edge.kind === 'aggregate') { edge.bow = 0; routed.push(curveSample(a, b, 0)); continue }
+      const cw = routed.reduce((sum, q) => sum + polyCross(curveSample(a, b, 1), q), 0)
+      const ccw = routed.reduce((sum, q) => sum + polyCross(curveSample(a, b, -1), q), 0)
+      edge.bow = ccw < cw ? -1 : 1
+      routed.push(curveSample(a, b, edge.bow))
+    }
+  }
+
+  const layeredAnchors = (expanded, ringRadius) => {
+    const names = state.projects.map(project => project.name)
+    const anchors = new Map()
+    if (expanded === null) {
+      const radius = Math.max(150, Math.min(state.width, state.height) * 0.22)
+      names.forEach((name, index) => {
+        const angle = names.length === 1 ? 0 : (index / names.length) * Math.PI * 2
+        anchors.set(name, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius })
+      })
+      return anchors
+    }
+    anchors.set(expanded, { x: 0, y: 0 })
+    const others = names.filter(name => name !== expanded)
+    const orbit = ringRadius + 175
+    others.forEach((name, index) => {
+      const angle = -Math.PI / 2 + (index / Math.max(others.length, 1)) * Math.PI * 2
+      anchors.set(name, { x: Math.cos(angle) * orbit, y: Math.sin(angle) * orbit })
     })
-    state.edges = payload.edges
+    return anchors
+  }
+
+  const groupNode = (name, { dim = false } = {}) => {
+    const members = projectMembers(name)
+    return {
+      id: `group:${name}`,
+      isGroup: true,
+      project: name,
+      title: name,
+      color: colorOfProject(name),
+      count: members.length,
+      msgs: members.reduce((sum, node) => sum + node.msgs, 0),
+      size: baseGroupSize(name),
+      sessionId: null,
+      dim,
+    }
+  }
+
+  const computeLayered = () => {
+    const raw = state.raw
+    const adj = adjacency()
+    const projects = state.projects.map(project => project.name)
+    const focusNode = state.focusId !== null ? rawById.get(state.focusId) : null
+    const focusProject = focusNode?.project ?? null
+    const expanded = state.expanded
+
+    // Which sessions of the expanded project sit on the ring.
+    let displayed = []
+    let newestId = null
+    if (expanded !== null) {
+      const members = projectMembers(expanded)
+      newestId = members[0]?.id ?? null
+      if (focusNode !== null && focusNode.project === expanded) {
+        displayed = [state.focusId, ...relatedInProject(state.focusId)].map(id => rawById.get(id)).filter(Boolean)
+      } else {
+        const n = members.length
+        const start = n === 0 ? 0 : ((state.rotation % n) + n) % n
+        for (let i = 0; i < Math.min(RING_MAX, n); i += 1) displayed.push(members[(start + i) % n])
+      }
+    }
+    const ringRadius = expanded === null ? 0 : Math.max(95, 30 + displayed.length * 17)
+    const anchors = layeredAnchors(expanded, ringRadius)
+
+    // Cross-project associations of the focused session (revealed on small rings).
+    const associated = new Map()
+    if (focusNode !== null) {
+      for (const id of adj.get(state.focusId) ?? []) {
+        const other = rawById.get(id)
+        if (other === undefined || other.project === focusProject) continue
+        if (!associated.has(other.project)) associated.set(other.project, [])
+        associated.get(other.project).push(other)
+      }
+      for (const [name, list] of associated) associated.set(name, byTimeDesc(list).map(node => node.id))
+    }
+
+    // Nodes.
+    const nodes = []
+    if (expanded === null) {
+      for (const name of projects) {
+        const node = groupNode(name)
+        const anchor = anchors.get(name)
+        node.tx = anchor.x
+        node.ty = anchor.y
+        nodes.push(node)
+      }
+    } else {
+      const hub = groupNode(expanded)
+      hub.tx = 0
+      hub.ty = 0
+      hub.isHub = true
+      nodes.push(hub)
+      displayed.forEach((node, index) => {
+        const angle = -Math.PI / 2 + (index / Math.max(displayed.length, 1)) * Math.PI * 2
+        nodes.push({
+          ...node,
+          tx: Math.cos(angle) * ringRadius,
+          ty: Math.sin(angle) * ringRadius,
+          newest: node.id === newestId,
+          onRing: true,
+          focused: node.id === state.focusId,
+        })
+      })
+      for (const name of projects) {
+        if (name === expanded) continue
+        const list = associated.get(name) ?? null
+        const dim = focusNode !== null && list === null
+        const group = groupNode(name, { dim })
+        const anchor = anchors.get(name)
+        group.tx = anchor.x
+        group.ty = anchor.y
+        nodes.push(group)
+        if (list !== null) {
+          const radius = 42 + list.length * 7
+          list.forEach((id, index) => {
+            const node = rawById.get(id)
+            const angle = -Math.PI / 2 + (index / Math.max(list.length, 1)) * Math.PI * 2
+            nodes.push({ ...node, tx: anchor.x + Math.cos(angle) * radius, ty: anchor.y + Math.sin(angle) * radius, revealed: true })
+          })
+        }
+      }
+    }
+
+    // Edges.
+    const edges = []
+    if (expanded === null) {
+      const agg = new Map()
+      for (const edge of raw.edges) {
+        const a = rawById.get(edge.source)
+        const b = rawById.get(edge.target)
+        if (a === undefined || b === undefined || a.project === b.project) continue
+        const [x, y] = a.project < b.project ? [a.project, b.project] : [b.project, a.project]
+        const key = `${x}|${y}`
+        const current = agg.get(key) ?? { source: `group:${x}`, target: `group:${y}`, kind: 'aggregate', count: 0, weight: 0.1 }
+        current.count += 1
+        current.weight = Math.min(1, 0.15 + Math.log2(current.count + 1) / 4)
+        agg.set(key, current)
+      }
+      for (const edge of agg.values()) edges.push(edge)
+    } else {
+      const agg = new Map()
+      for (const edge of raw.edges) {
+        const a = rawById.get(edge.source)
+        const b = rawById.get(edge.target)
+        if (a === undefined || b === undefined || a.project === b.project) continue
+        const other = a.project === expanded ? b.project : (b.project === expanded ? a.project : null)
+        if (other === null) continue
+        agg.set(other, (agg.get(other) ?? 0) + 1)
+      }
+      for (const [other, count] of agg) {
+        edges.push({ source: `group:${expanded}`, target: `group:${other}`, kind: 'aggregate', count, weight: Math.min(1, 0.15 + Math.log2(count + 1) / 4) })
+      }
+      // Only the selected (top-slot / focused) session shows its lines; the ring
+      // stays otherwise line-free so it never turns into a web.
+      const shown = new Set(displayed.map(node => node.id))
+      const activeId = displayed[0]?.id ?? null
+      if (activeId !== null) {
+        for (const edge of raw.edges) {
+          if (edge.source !== activeId && edge.target !== activeId) continue
+          if (shown.has(edge.source) && shown.has(edge.target)) edges.push(edge)
+        }
+      }
+      if (focusNode !== null) {
+        for (const list of associated.values()) {
+          for (const id of list) edges.push({ source: state.focusId, target: id, kind: edgeKindBetween(state.focusId, id), weight: 0.85 })
+        }
+      }
+    }
+    routeEdges(nodes, edges)
+    return { nodes, edges, ringRadius, hasFocus: focusNode !== null, expanded, topSlotId: displayed[0]?.id ?? null }
+  }
+
+  const viewSignature = () => `${state.nodes.map(node => node.id).sort().join(',')}|${state.edges.length}`
+
+  /** Rebuild the on-screen graph: compute target positions, keep each node's
+   *  current position (by id) so the view eases into the new layout. */
+  const refreshLayout = ({ animate = false } = {}) => {
+    state.hovered = null
+    hideTooltip()
+    const previous = new Map(state.nodes.map(node => [node.id, node]))
+    const view = state.layered ? computeLayered() : { nodes: state.raw.nodes, edges: state.raw.edges }
+    state.ringRadius = view.ringRadius ?? 0
+    state.hasFocus = view.hasFocus ?? false
+    state.topSlotId = view.topSlotId ?? null
+    state.nodes = view.nodes.map(node => {
+      const old = previous.get(node.id)
+      if (old !== undefined) return { ...node, x: old.x, y: old.y, vx: 0, vy: 0, pinned: false }
+      // A brand new node emerges from where its project's super node was.
+      const seed = previous.get(`group:${node.project}`)
+      const base = seed !== undefined ? seed : { x: node.tx, y: node.ty }
+      return { ...node, x: base.x, y: base.y, vx: 0, vy: 0, pinned: false }
+    })
+    state.edges = view.edges
     buildIndex()
     renderLegend()
-    // Layout only moves when the user asks: the first paint, an explicit "重排",
-    // or a manual "AI 连线" (which re-arranges after it connects). A background
-    // refresh from new messages only settles the physics, it never re-seeds.
-    if (!state.seeded && state.nodes.length > 0) {
-      state.seeded = true
-      seedPositions()
-      reheat()
-    } else if (rearrange) {
-      seedPositions()
-      reheat()
-    } else if (changed) {
-      reheat()
+    // First time anything is drawn, auto-fit so the map is centred on open.
+    if (!state.didInitialFit && state.nodes.length > 0) {
+      state.didInitialFit = true
+      state.fitPending = true
     }
     paint()
     updateStatus()
-    emptyState.hidden = state.nodes.length > 0
+    startLoop()
+  }
+
+  const setExpanded = (name, { focus = null } = {}) => {
+    state.expanded = name
+    state.rotation = 0
+    state.focusId = focus
+    refreshLayout({ animate: true })
+    if (name !== null) centerOnCluster()
+    else state.fitPending = true
+  }
+
+  const toggleProject = name => {
+    if (state.expanded === name) { setExpanded(null); say(`收起「${name}」`); return }
+    setExpanded(name)
+    say(`展开「${name}」`)
+  }
+
+  const focusSession = id => {
+    const node = rawById.get(id)
+    if (node === undefined) return
+    state.expanded = node.project
+    state.focusId = id
+    state.rotation = 0
+    refreshLayout({ animate: true })
+  }
+
+  const clearFocus = () => {
+    if (state.focusId === null) return
+    state.focusId = null
+    refreshLayout({ animate: true })
+    state.fitPending = true
+  }
+
+  const rotateSelection = step => {
+    if (!state.layered || state.expanded === null || state.focusId !== null) return
+    const total = projectMembers(state.expanded).length
+    if (total === 0) return
+    state.rotation = (((state.rotation + step) % total) + total) % total
+    refreshLayout()
+  }
+
+  /** Fit the view to the expanded cluster (hub + ring + orbiting super nodes). */
+  const centerOnCluster = () => {
+    if (state.expanded === null) return
+    const span = (state.ringRadius + 260) * 2
+    const k = clamp(Math.min(state.width, state.height) / span, 0.22, 1.15)
+    setView({ k, x: state.width / 2, y: state.height / 2 })
+  }
+
+  const applyGraph = (payload, { rearrange = false } = {}) => {
+    state.raw = {
+      nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+      edges: Array.isArray(payload.edges) ? payload.edges : [],
+    }
+    state.projects = Array.isArray(payload.projects) ? payload.projects : []
+    state.meta = payload.meta ?? {}
+    rawById.clear()
+    for (const node of state.raw.nodes) rawById.set(node.id, node)
+    if (state.layered) {
+      // A just-created session lives inside a collapsed group: open its project
+      // and focus it so the new node is visible.
+      if (state.pendingFocus != null) {
+        const node = rawById.get(state.pendingFocus)
+        if (node !== undefined) {
+          state.expanded = node.project
+          state.focusId = node.id
+        }
+      }
+      refreshLayout({ animate: rearrange })
+    } else {
+      const before = viewSignature()
+      const previous = new Map(state.nodes.map(node => [node.id, node]))
+      state.nodes = state.raw.nodes.map(node => ({
+        ...node,
+        x: previous.get(node.id)?.x ?? 0,
+        y: previous.get(node.id)?.y ?? 0,
+        vx: previous.get(node.id)?.vx ?? 0,
+        vy: previous.get(node.id)?.vy ?? 0,
+        pinned: previous.get(node.id)?.pinned ?? false,
+      }))
+      state.edges = state.raw.edges
+      buildIndex()
+      renderLegend()
+      const changed = before !== viewSignature()
+      if (!state.seeded && state.nodes.length > 0) { state.seeded = true; seedPositions(); reheat() }
+      else if (rearrange) { seedPositions(); reheat() }
+      else if (changed) reheat(0.5)
+      paint()
+      updateStatus()
+      emptyState.hidden = state.nodes.length > 0
+    }
     if (state.pendingFocus !== undefined && state.pendingFocus !== null) {
       const node = state.byId.get(state.pendingFocus)
       state.pendingFocus = null
@@ -208,7 +611,9 @@
 
   const projectAnchors = () => {
     const anchors = new Map()
-    const names = [...new Set(state.nodes.map(node => node.project))]
+    const names = state.projects.length > 0
+      ? state.projects.map(project => project.name)
+      : [...new Set(state.nodes.map(node => node.project))]
     const radius = Math.max(120, Math.min(state.width, state.height) * 0.18)
     names.forEach((name, index) => {
       const angle = names.length === 1 ? 0 : (index / names.length) * Math.PI * 2
@@ -236,10 +641,25 @@
     state.view = { x: state.width / 2, y: state.height / 2, k: 1 }
   }
 
-  const reheat = () => {
-    state.alpha = 1
+  const reheat = (alpha = 1) => {
+    state.alpha = Math.max(state.alpha, alpha)
     state.targetAlpha = 0
     startLoop()
+  }
+
+  /** Ease every node toward its computed target (layered mode). */
+  const easeStep = () => {
+    let moving = false
+    for (const node of state.nodes) {
+      const tx = node.tx ?? node.x
+      const ty = node.ty ?? node.y
+      const dx = tx - node.x
+      const dy = ty - node.y
+      if (Math.abs(dx) > 0.3 || Math.abs(dy) > 0.3) moving = true
+      node.x += dx * 0.2
+      node.y += dy * 0.2
+    }
+    return moving
   }
 
   let loopHandle = null
@@ -250,9 +670,15 @@
 
   const tick = () => {
     loopHandle = null
-    step()
+    let moving
+    if (state.layered) {
+      moving = easeStep()
+    } else {
+      step()
+      moving = state.alpha > 0.012
+    }
     paintPositions()
-    if (state.alpha > 0.012) {
+    if (moving) {
       loopHandle = requestAnimationFrame(tick)
       return
     }
@@ -307,8 +733,8 @@
       const a = state.byId.get(edge.source)
       const b = state.byId.get(edge.target)
       if (a === undefined || b === undefined) continue
-      const rest = edge.kind === 'fork' ? 96 : 150
-      const spring = edge.kind === 'fork' ? 0.05 : 0.02 * (0.6 + edge.weight)
+      const rest = edge.kind === 'fork' ? 96 : edge.kind === 'aggregate' ? 240 : 150
+      const spring = edge.kind === 'fork' ? 0.05 : edge.kind === 'aggregate' ? 0.012 : 0.02 * (0.6 + edge.weight)
       let dx = b.x - a.x
       let dy = b.y - a.y
       let dist = Math.hypot(dx, dy) || 0.001
@@ -389,19 +815,56 @@
   const nodeScreenRadius = node => node.size * 0.5 * (0.55 + 0.45 * clamp(state.view.k, 0.3, 2.4))
 
   const paint = () => {
+    defs.textContent = ''
+    glowLayer.textContent = ''
     linkLayer.textContent = ''
+    boxLayer.textContent = ''
     nodeLayer.textContent = ''
-    for (const edge of state.edges) {
-      const line = document.createElementNS(SVG_NS, 'line')
+    state.edgeViews = state.edges.map((edge, index) => {
+      // Each link gets its own user-space gradient so it can fade out at both
+      // endpoints. Stops carry the colour; stop-opacity carries the base and
+      // the fade (0 at the ends, full a little way in).
+      const gradientId = `edge-gradient-${index}`
+      const gradient = document.createElementNS(SVG_NS, 'linearGradient')
+      gradient.setAttribute('id', gradientId)
+      gradient.setAttribute('gradientUnits', 'userSpaceOnUse')
+      const stops = [0, 1, 2, 3].map(() => {
+        const stop = document.createElementNS(SVG_NS, 'stop')
+        gradient.appendChild(stop)
+        return stop
+      })
+      defs.appendChild(gradient)
+      const tag = state.layered ? 'path' : 'line'
+      const glow = document.createElementNS(SVG_NS, tag)
+      glow.setAttribute('class', 'graph-glow')
+      glow.dataset.source = edge.source
+      glow.dataset.target = edge.target
+      if (tag === 'path') glow.setAttribute('fill', 'none')
+      glowLayer.appendChild(glow)
+      const line = document.createElementNS(SVG_NS, tag)
       line.setAttribute('class', `graph-link graph-link-${edge.kind}`)
       line.dataset.source = edge.source
       line.dataset.target = edge.target
+      if (tag === 'path') line.setAttribute('fill', 'none')
+      line.style.stroke = `url(#${gradientId})`
       linkLayer.appendChild(line)
+      return { edge, line, glow, gradient, stops, gaps: [], curved: tag === 'path' }
+    })
+    // Selection slot (fixed at the top of the ring while a project is expanded).
+    state.boxEl = null
+    if (state.layered && state.expanded !== null && state.focusId === null) {
+      const box = document.createElementNS(SVG_NS, 'circle')
+      box.setAttribute('class', 'graph-ring-box')
+      boxLayer.appendChild(box)
+      state.boxEl = box
     }
     for (const node of state.nodes) {
       const group = document.createElementNS(SVG_NS, 'g')
       group.setAttribute('class', 'graph-node')
       group.dataset.id = node.id
+      const newest = document.createElementNS(SVG_NS, 'circle')
+      newest.setAttribute('class', 'graph-node-newest')
+      newest.style.display = node.newest === true ? '' : 'none'
       const halo = document.createElementNS(SVG_NS, 'circle')
       halo.setAttribute('class', 'graph-node-halo')
       const dot = document.createElementNS(SVG_NS, 'circle')
@@ -409,8 +872,10 @@
       const label = document.createElementNS(SVG_NS, 'text')
       label.setAttribute('class', 'graph-node-label')
       label.setAttribute('text-anchor', 'middle')
-      label.textContent = node.title.length > 16 ? `${node.title.slice(0, 15)}…` : node.title
-      group.append(halo, dot, label)
+      label.textContent = node.isGroup === true
+        ? `${node.title} · ${node.count}`
+        : (node.title.length > 16 ? `${node.title.slice(0, 15)}…` : node.title)
+      group.append(newest, halo, dot, label)
       group.addEventListener('pointerenter', () => { state.hovered = node.id; hover(node, group) })
       group.addEventListener('pointerleave', () => { state.hovered = null; unhover(); hideTooltip() })
       group.addEventListener('pointerdown', event => beginNodeDrag(event, node))
@@ -418,10 +883,17 @@
         if (state.suppressClick === true) { state.suppressClick = false; return }
         if (state.dragMoved === true) { state.dragMoved = false; return }
         event.stopPropagation()
-        openSession(node)
+        if (node.isGroup === true) toggleProject(node.project)
+        else if (state.layered) focusSession(node.id)
+        else openSession(node)
+      })
+      group.addEventListener('dblclick', event => {
+        event.stopPropagation()
+        if (node.isGroup !== true) openSession(node)
       })
       nodeLayer.appendChild(group)
       node.group = group
+      node.newestMark = newest
       node.halo = halo
       node.dot = dot
       node.label = label
@@ -439,21 +911,64 @@
       node.dot.setAttribute('r', r.toFixed(2))
       node.dot.setAttribute('fill', node.color)
       node.halo.setAttribute('r', (r + 7 / k).toFixed(2))
-      const showLabel = k > 0.75 || state.hovered === node.id || state.matched.has(node.id) || state.active === node.id
+      node.newestMark.setAttribute('r', (r + 5 / k).toFixed(2))
+      node.newestMark.setAttribute('fill', node.color)
+      node.group.classList.toggle('is-faded', node.dim === true)
+      node.group.classList.toggle('is-focused', node.focused === true)
+      const small = node.onRing === true || node.revealed === true
+      const hoveredLike = state.hovered === node.id || state.matched.has(node.id) || state.active === node.id
+      const showLabel = !state.hiddenProjects.has(node.project) && (node.isGroup === true || hoveredLike || (k > 0.75 && !small))
       node.label.setAttribute('font-size', (12 / k).toFixed(2))
       node.label.setAttribute('y', (r + 15 / k).toFixed(2))
-      node.label.style.display = showLabel && !state.hiddenProjects.has(node.project) ? '' : 'none'
+      node.label.style.display = showLabel ? '' : 'none'
     }
-    for (const line of linkLayer.childNodes) {
-      const a = state.byId.get(line.dataset.source)
-      const b = state.byId.get(line.dataset.target)
+    if (state.boxEl !== null) {
+      const top = state.byId.get(state.topSlotId)
+      if (top !== undefined) {
+        const r = nodeScreenRadius(top) / k
+        state.boxEl.setAttribute('cx', top.x.toFixed(2))
+        state.boxEl.setAttribute('cy', top.y.toFixed(2))
+        state.boxEl.setAttribute('r', (r + 6 / k).toFixed(2))
+        state.boxEl.setAttribute('stroke-width', (2 / k).toFixed(2))
+      }
+    }
+    const soften = softEnabled()
+    for (const view of state.edgeViews) {
+      const { edge, line, glow, gradient, stops } = view
+      const a = state.byId.get(edge.source)
+      const b = state.byId.get(edge.target)
       if (a === undefined || b === undefined) continue
-      line.setAttribute('x1', a.x.toFixed(2))
-      line.setAttribute('y1', a.y.toFixed(2))
-      line.setAttribute('x2', b.x.toFixed(2))
-      line.setAttribute('y2', b.y.toFixed(2))
-      line.setAttribute('stroke-width', ((line.classList.contains('graph-link-fork') ? 1.7 : 1.1) / k).toFixed(3))
+      const width = edge.kind === 'fork' ? 1.7 : edge.kind === 'aggregate' ? 1.2 + Math.sqrt(edge.count ?? 1) * 0.9 : 1.1
+      if (view.curved === true) {
+        const d = curvePath(a, b, edge.bow ?? 0)
+        line.setAttribute('d', d)
+        glow.setAttribute('d', d)
+      } else {
+        line.setAttribute('x1', a.x.toFixed(2))
+        line.setAttribute('y1', a.y.toFixed(2))
+        line.setAttribute('x2', b.x.toFixed(2))
+        line.setAttribute('y2', b.y.toFixed(2))
+        glow.setAttribute('x1', a.x.toFixed(2))
+        glow.setAttribute('y1', a.y.toFixed(2))
+        glow.setAttribute('x2', b.x.toFixed(2))
+        glow.setAttribute('y2', b.y.toFixed(2))
+      }
+      line.setAttribute('stroke-width', (width / k).toFixed(3))
+      glow.setAttribute('stroke-width', ((width * GLOW_WIDTH_FACTOR) / k).toFixed(3))
+      gradient.setAttribute('x1', a.x.toFixed(2))
+      gradient.setAttribute('y1', a.y.toFixed(2))
+      gradient.setAttribute('x2', b.x.toFixed(2))
+      gradient.setAttribute('y2', b.y.toFixed(2))
+      const length = Math.hypot(b.x - a.x, b.y - a.y)
+      const fade = soften ? clamp(ENDPOINT_FADE_PX / Math.max(length, 1), 0.04, 0.42) : 0
+      stops[0].setAttribute('offset', '0')
+      stops[0].setAttribute('stop-opacity', '0')
+      stops[1].setAttribute('offset', fade.toFixed(4))
+      stops[2].setAttribute('offset', (1 - fade).toFixed(4))
+      stops[3].setAttribute('offset', '1')
+      stops[3].setAttribute('stop-opacity', '0')
     }
+    refreshWeave()
     updateEmphasis()
   }
 
@@ -481,24 +996,177 @@
       if (dim) node.label.style.display = 'none'
       else if (k0() > 0.75 || state.hovered === node.id || state.matched.has(node.id) || state.active === node.id) node.label.style.display = ''
     }
-    for (const line of linkLayer.childNodes) {
-      const a = state.byId.get(line.dataset.source)
-      const b = state.byId.get(line.dataset.target)
+    for (const view of state.edgeViews) {
+      const a = state.byId.get(view.edge.source)
+      const b = state.byId.get(view.edge.target)
       if (a === undefined || b === undefined) continue
       const show = visible(a) && visible(b)
-      line.style.display = show ? '' : 'none'
+      view.line.style.display = show ? '' : 'none'
+      view.glow.style.display = show && softEnabled() ? '' : 'none'
       if (focus !== null) {
         const hot = (focus.has(a.id) && related.has(b.id)) || (focus.has(b.id) && related.has(a.id))
-        line.classList.toggle('is-hot', hot)
-        line.style.opacity = hot ? '1' : '0.12'
+        view.line.classList.toggle('is-hot', hot)
+        view.line.style.opacity = hot ? '1' : '0.12'
+        view.glow.style.opacity = hot ? '' : '0.12'
+        setEdgeColor(view, hot)
       } else {
-        line.classList.remove('is-hot')
-        line.style.opacity = ''
+        view.line.classList.remove('is-hot')
+        view.line.style.opacity = ''
+        view.glow.style.opacity = ''
+        setEdgeColor(view, false)
       }
     }
+    refreshWeave()
   }
 
   const k0 = () => state.view.k
+
+  // ------------------------------------------------------- link softening ---
+
+  const softEnabled = () => state.soften !== false
+
+  const refreshSoftenButton = () => {
+    softenButton.classList.toggle('is-off', !softEnabled())
+    softenButton.setAttribute('aria-pressed', softEnabled() ? 'true' : 'false')
+  }
+
+  const refreshLayeredButton = () => {
+    layeredButton.classList.toggle('is-off', !state.layered)
+    layeredButton.setAttribute('aria-pressed', state.layered ? 'true' : 'false')
+  }
+
+  /** Paint one link's gradient stops for its normal or highlighted colour. */
+  const setEdgeColor = (view, hot) => {
+    const palette = LINK_COLORS[state.theme] ?? LINK_COLORS.light
+    const alpha = LINK_ALPHA[state.theme] ?? LINK_ALPHA.light
+    const kind = view.edge.kind
+    const color = hot ? palette.hot : (kind === 'fork' ? palette.fork : palette.topic)
+    const opacity = hot ? alpha.hot : (kind === 'fork' ? alpha.fork : alpha.topic)
+    for (const stop of view.stops) stop.setAttribute('stop-color', color)
+    view.stops[1].setAttribute('stop-opacity', String(opacity))
+    view.stops[2].setAttribute('stop-opacity', String(opacity))
+    view.glow.setAttribute('stroke', color)
+    view.glow.setAttribute('stroke-opacity', String(GLOW_OPACITY))
+  }
+
+  const segmentCrossParam = (a, b, c, d) => {
+    const rx = b.x - a.x
+    const ry = b.y - a.y
+    const sx = d.x - c.x
+    const sy = d.y - c.y
+    const denom = rx * sy - ry * sx
+    if (Math.abs(denom) < 1e-9) return null
+    const t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / denom
+    const u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / denom
+    if (t <= 0 || t >= 1 || u <= 0 || u >= 1) return null
+    return { t, u }
+  }
+
+  /** Which of two crossing links gets the gap (the other reads as on top). */
+  const underEdge = (v1, v2) => {
+    const r1 = EDGE_KIND_RANK[v1.edge.kind] ?? 1
+    const r2 = EDGE_KIND_RANK[v2.edge.kind] ?? 1
+    if (r1 !== r2) return r1 < r2 ? v1 : v2
+    // Same kind: the lighter connection goes under; ties fall to the later one.
+    const w1 = Number.isFinite(v1.edge.weight) ? v1.edge.weight : 0.5
+    const w2 = Number.isFinite(v2.edge.weight) ? v2.edge.weight : 0.5
+    if (w1 < w2) return v1
+    if (w2 < w1) return v2
+    return v2
+  }
+
+  /**
+   * Dash pattern for a link: solid links break only at crossings; dashed (AI)
+   * links keep their base rhythm and widen it into a gap at each crossing.
+   */
+  const buildDashPattern = (length, centers, baseDash) => {
+    const pattern = []
+    let cursor = 0
+    const emit = span => {
+      if (span <= 0.01) { pattern.push(0); return }
+      if (baseDash <= 0) { pattern.push(span); return }
+      let pos = 0
+      while (pos < span - 0.01) {
+        const on = Math.min(baseDash, span - pos)
+        pattern.push(on)
+        pos += on
+        if (pos < span - 0.01) {
+          const off = Math.min(baseDash, span - pos)
+          pattern.push(off)
+          pos += off
+        }
+      }
+    }
+    for (const center of centers) {
+      const start = Math.max(cursor, center - CROSS_GAP_PX / 2)
+      const end = Math.min(length, center + CROSS_GAP_PX / 2)
+      if (end <= start) continue
+      emit(start - cursor)
+      pattern.push(end - start)
+      cursor = end
+    }
+    emit(length - cursor)
+    return pattern
+  }
+
+  // Break the lower link at each crossing so the map reads as woven, not mashed.
+  const refreshWeave = () => {
+    if (state.edgeViews.length === 0) return
+    // Curved layered links are routed to avoid crossings instead of being
+    // broken with weave gaps.
+    if (state.layered) return
+    for (const view of state.edgeViews) {
+      view.gaps = []
+      view.line.removeAttribute('stroke-dasharray')
+    }
+    if (!softEnabled()) return
+    const focus = state.matched.size > 0 ? state.matched : (state.hovered !== null ? new Set([state.hovered]) : null)
+    const related = new Set()
+    if (focus !== null) {
+      for (const id of focus) {
+        related.add(id)
+        for (const neighbor of state.neighbors.get(id) ?? []) related.add(neighbor)
+      }
+    }
+    const active = []
+    for (const view of state.edgeViews) {
+      const a = state.byId.get(view.edge.source)
+      const b = state.byId.get(view.edge.target)
+      if (a === undefined || b === undefined) continue
+      if (!visible(a) || !visible(b)) continue
+      if (focus !== null) {
+        const hot = (focus.has(a.id) && related.has(b.id)) || (focus.has(b.id) && related.has(a.id))
+        if (!hot) continue
+      }
+      active.push(view)
+    }
+    for (let i = 0; i < active.length; i += 1) {
+      const v1 = active[i]
+      const a = state.byId.get(v1.edge.source)
+      const b = state.byId.get(v1.edge.target)
+      for (let j = i + 1; j < active.length; j += 1) {
+        const v2 = active[j]
+        const c = state.byId.get(v2.edge.source)
+        const d = state.byId.get(v2.edge.target)
+        const hit = segmentCrossParam(a, b, c, d)
+        if (hit === null) continue
+        const under = underEdge(v1, v2)
+        if (under === null) continue
+        under.gaps.push(under === v1 ? hit.t : hit.u)
+      }
+    }
+    for (const view of active) {
+      if (view.gaps.length === 0) continue
+      const a = state.byId.get(view.edge.source)
+      const b = state.byId.get(view.edge.target)
+      const length = Math.hypot(b.x - a.x, b.y - a.y)
+      if (length < 1) continue
+      const gaps = view.gaps.map(t => t * length).sort((x, y) => x - y)
+      const baseDash = view.edge.kind === 'ai' ? 4 : 0
+      const pattern = buildDashPattern(length, gaps, baseDash)
+      view.line.setAttribute('stroke-dasharray', pattern.map(value => value.toFixed(2)).join(' '))
+    }
+  }
 
   const hover = (node, group) => {
     if (group !== undefined) group.classList.add('is-hover')
@@ -527,12 +1195,13 @@
       metaRow.append(el('span', { class: 'graph-tooltip-sep', text: '·' }))
       metaRow.append(el('span', { text: last }))
     }
-    if (node.questions.length > 0) tooltip.append(el('div', { class: 'graph-tooltip-q', text: node.questions[0] }))
+    const questions = Array.isArray(node.questions) ? node.questions : []
+    if (questions.length > 0) tooltip.append(el('div', { class: 'graph-tooltip-q', text: questions[0] }))
     const reasons = state.edges
       .filter(edge => edge.reason !== undefined && (edge.source === node.id || edge.target === node.id))
       .map(edge => edge.reason)
     if (reasons.length > 0) tooltip.append(el('div', { class: 'graph-tooltip-link', text: `关联：${reasons.slice(0, 2).join(' / ')}` }))
-    tooltip.append(el('div', { class: 'graph-tooltip-hint', text: '点击打开这个对话' }))
+    tooltip.append(el('div', { class: 'graph-tooltip-hint', text: node.isGroup === true ? '点击展开 / 收起这个项目' : '点击打开这个对话' }))
     tooltip.hidden = false
   }
 
@@ -556,7 +1225,7 @@
     if (title.startsWith(needle)) return 100
     if (title.includes(needle)) return 80
     if (node.project.toLowerCase().includes(needle)) return 55
-    for (const question of node.questions) if (question.toLowerCase().includes(needle)) return 40
+    for (const question of node.questions ?? []) if (question.toLowerCase().includes(needle)) return 40
     return 0
   }
 
@@ -569,7 +1238,8 @@
       updateEmphasis()
       return
     }
-    const scored = state.nodes
+    const pool = state.layered && state.raw !== null ? state.raw.nodes : state.nodes
+    const scored = pool
       .filter(node => visible(node))
       .map(node => ({ node, score: scoreNode(node, needle) }))
       .filter(hit => hit.score > 0)
@@ -582,7 +1252,10 @@
       marker.style.background = hit.node.color
       row.append(el('span', { class: 'graph-result-title', text: hit.node.title }))
       row.append(el('span', { class: 'graph-result-project', text: hit.node.project }))
-      row.addEventListener('click', () => { openSession(hit.node) })
+      row.addEventListener('click', () => {
+        if (state.layered) focusSession(hit.node.id)
+        else openSession(hit.node)
+      })
     }
     results.hidden = scored.length === 0
     if (scored.length === 0) results.append(el('div', { class: 'graph-result-empty', text: '没有匹配的对话' }))
@@ -599,7 +1272,8 @@
     if (state.projects.length === 0) { legend.hidden = true; return }
     legend.hidden = false
     for (const project of state.projects) {
-      const count = state.nodes.filter(node => node.project === project.name).length
+      const source = state.layered && state.raw !== null ? state.raw.nodes : state.nodes
+      const count = source.filter(node => node.project === project.name).length
       const chip = el('button', { class: 'graph-chip', type: 'button', title: `只看/隐藏「${project.name}」` }, legend)
       const marker = el('span', { class: 'graph-chip-dot' }, chip)
       marker.style.background = project.color
@@ -617,7 +1291,19 @@
   }
 
   const updateStatus = () => {
-    statusCount.textContent = `${state.nodes.length} 个对话 · ${state.edges.length} 条连线`
+    if (state.layered && state.raw !== null) {
+      const total = state.raw.nodes.length
+      if (state.expanded !== null) {
+        const ring = state.nodes.filter(node => node.onRing === true).length
+        const revealed = state.nodes.filter(node => node.revealed === true).length
+        statusCount.textContent = `${state.expanded}：${ring}/${projectMembers(state.expanded).length}${revealed > 0 ? ` · 关联 ${revealed}` : ''}${state.focusId !== null ? ' · 聚焦中' : ''}`
+      } else {
+        const groups = state.nodes.filter(node => node.isGroup === true).length
+        statusCount.textContent = `${total} 个对话 · ${groups} 个项目`
+      }
+    } else {
+      statusCount.textContent = `${state.nodes.length} 个对话 · ${state.edges.length} 条连线`
+    }
     const source = state.meta?.source
     statusSource.className = 'graph-status-source'
     if (source === 'ai' || source === 'ai-cached') {
@@ -730,6 +1416,15 @@
   svg.addEventListener('touchcancel', endPinch, { passive: true })
 
   svg.addEventListener('wheel', event => {
+    // Over an expanded ring, the wheel rotates the selection instead of zooming.
+    if (state.layered && state.expanded !== null && state.focusId === null && event.ctrlKey !== true) {
+      const world = screenToWorld(localPoint(event))
+      if (Math.hypot(world.x, world.y) <= state.ringRadius + 170) {
+        event.preventDefault()
+        rotateSelection(event.deltaY > 0 ? 1 : -1)
+        return
+      }
+    }
     event.preventDefault()
     const point = localPoint(event)
     const factor = Math.exp((event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY) * -0.0016)
@@ -784,22 +1479,28 @@
 
   const beginNodeDrag = (event, node) => {
     if (pinch !== null) return
+    if (state.layered) return // positions are computed; dragging is disabled here
     event.stopPropagation()
     state.dragging = node
     node.dragging = true
     node.pinned = false
     state.dragMoved = false
-    try { svg.setPointerCapture(event.pointerId) } catch { /* ignore */ }
+    // Do NOT capture the pointer on the <svg>: capture retargets the follow-up
+    // `click` to the svg, so the node's own click handler would never fire (the
+    // canvas already covers the whole shell, so moves still reach it regardless).
     updateEmphasis()
   }
 
   svg.addEventListener('click', event => {
     if (event.target.closest?.('.graph-node') !== undefined && event.target.closest?.('.graph-node') !== null) return
     state.active = null
-    updateEmphasis()
+    if (state.layered && state.focusId !== null) clearFocus()
+    else updateEmphasis()
   })
 
-  svg.addEventListener('dblclick', () => fit())
+  svg.addEventListener('dblclick', event => {
+    if (event.target.closest?.('.graph-node') === undefined || event.target.closest?.('.graph-node') === null) fit()
+  })
 
   // ------------------------------------------------------------- controls ---
 
@@ -812,12 +1513,21 @@
     if (event.key === 'Enter') {
       const needle = state.query.trim().toLowerCase()
       if (needle === '') return
-      const best = state.nodes
+      const pool = state.layered && state.raw !== null ? state.raw.nodes : state.nodes
+      const best = pool
         .filter(node => visible(node))
         .map(node => ({ node, score: scoreNode(node, needle) }))
         .sort((a, b) => b.score - a.score)[0]
-      if (best !== undefined && best.score > 0) { state.active = best.node.id; centerOn(best.node); updateEmphasis() }
-      else say('没有匹配的对话')
+      if (best !== undefined && best.score > 0) {
+        if (state.layered) {
+          searchInput.blur()
+          focusSession(best.node.id)
+        } else {
+          state.active = best.node.id
+          centerOn(best.node)
+          updateEmphasis()
+        }
+      } else say('没有匹配的对话')
     }
     if (event.key === 'Escape') {
       searchInput.value = ''
@@ -842,6 +1552,26 @@
 
   fitButton.addEventListener('click', () => fit())
 
+  softenButton.addEventListener('click', () => {
+    state.soften = !softEnabled()
+    try { localStorage.setItem(SOFTEN_KEY, state.soften ? '1' : '0') } catch { /* private mode */ }
+    refreshSoftenButton()
+    paint()
+    say(state.soften ? '连线柔化：开' : '连线柔化：关')
+  })
+
+  layeredButton.addEventListener('click', () => {
+    state.layered = !state.layered
+    try { localStorage.setItem(LAYERED_KEY, state.layered ? '1' : '0') } catch { /* private mode */ }
+    refreshLayeredButton()
+    state.expanded = null
+    state.focusId = null
+    state.rotation = 0
+    if (!state.layered) { state.seeded = false; seedPositions(); reheat() }
+    refreshLayout({ animate: true })
+    say(state.layered ? '分层视图：开（项目折成超级点）' : '分层视图：关（显示全部对话）')
+  })
+
   aiButton.addEventListener('click', async () => {
     aiButton.disabled = true
     aiButton.classList.add('is-busy')
@@ -856,12 +1586,35 @@
   })
 
   window.addEventListener('keydown', event => {
+    const typing = document.activeElement === searchInput
+    if (!typing && state.layered && state.expanded !== null) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (state.focusId === null) {
+          event.preventDefault()
+          rotateSelection(event.key === 'ArrowDown' ? 1 : -1)
+          return
+        }
+      }
+      if (event.key === 'Enter' && state.focusId === null && state.topSlotId !== null) {
+        event.preventDefault()
+        focusSession(state.topSlotId)
+        return
+      }
+    }
+    if (event.key === 'Tab' && state.layered && state.focusId !== null) {
+      event.preventDefault()
+      clearFocus()
+      return
+    }
     if (event.key === '/' && document.activeElement !== searchInput) {
       event.preventDefault()
       searchInput.focus()
       searchInput.select()
     }
-    if (event.key === 'Escape') hideTooltip()
+    if (event.key === 'Escape') {
+      if (state.layered && state.focusId !== null) clearFocus()
+      hideTooltip()
+    }
   })
 
   window.addEventListener('resize', () => {
@@ -879,6 +1632,8 @@
     if (data.type === 'synapse:theme') {
       state.theme = data.dark === true ? 'dark' : 'light'
       document.documentElement.dataset.theme = state.theme
+      // Link gradients bake the colours in, so repaint to pick up the theme.
+      paint()
       return
     }
     if (data.type === 'synapse:current-session') {
@@ -907,6 +1662,14 @@
   const init = async () => {
     state.width = shell.clientWidth || window.innerWidth
     state.height = shell.clientHeight || window.innerHeight
+    try {
+      const saved = localStorage.getItem(SOFTEN_KEY)
+      if (saved === '0') state.soften = false
+      const savedLayered = localStorage.getItem(LAYERED_KEY)
+      if (savedLayered === '0') state.layered = false
+    } catch { /* private mode */ }
+    refreshSoftenButton()
+    refreshLayeredButton()
     if (window.matchMedia?.('(prefers-color-scheme: dark)').matches === true) {
       state.theme = 'dark'
       document.documentElement.dataset.theme = 'dark'
