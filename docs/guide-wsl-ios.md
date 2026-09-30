@@ -224,7 +224,10 @@ tailscale serve --bg 3080
 Safari 打开 5.3 的地址 `https://laptop-xxxx.xxx.ts.net`，输入账号密码登录。
 建议点 **分享 → 添加到主屏幕**，以后像 App 一样一点就开。
 
-![编辑器示例](assets/amadeus-code-server.png)
+## 实机效果（iPad）
+![iPad 主页](assets/ipad-home.png)
+![iPad 代码编辑器](assets/ipad-editor.png)
+![iPad JupyterLab](assets/ipad-jupyter.png)
 
 ## 日常与排错
 - **开机后**：确认 Windows 上 Tailscale 已登录；打开一次「Ubuntu」（或运行 `wsl -d Ubuntu true`）让服务起来。

@@ -53,6 +53,10 @@ docker compose up -d --build
 
 ![WSL + iPad 远程结构](docs/assets/guide-wsl-ios-flow.svg)
 
+在 iPad 上（Safari 打开，已含个人信息的打码处理）：
+
+![iPad 主页](docs/assets/ipad-home.png)
+
 ## 能做什么
 
 | 功能 | 说明 |
