@@ -225,7 +225,7 @@ Safari 打开 5.3 的地址 `https://laptop-xxxx.xxx.ts.net`，输入账号密�
 建议点 **分享 → 添加到主屏幕**，以后像 App 一样一点就开。
 
 ## 实机效果（iPad）
-> 以下为真实 iPad 截图（个人姓名、电脑名、用户名、路径与对话标题已马赛克）。
+> 以下为真实 iPad 截图（个人姓名、电脑名、用户名、路径与对话标题已替换为占位文字）。
 
 ![iPad 主页](assets/ipad-home.png)
 ![iPad 上的学习对话](assets/ipad-chat.png)
