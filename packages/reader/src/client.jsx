@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createRoot } from 'react-dom/client';
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives';
 import { createAnnotationStore, findAnnotationReferences, locateConversationQuote, serializeAnnotations, parseAnnotatedPrompt } from './annotations.mjs';
+import { parseNoteCommand } from './note-format.mjs';
+import { readPreviewZoom, writePreviewZoom, stepPreviewZoom, previewZoomPercent, consumeWheelZoom, isZoomableFormat } from './preview-zoom.mjs';
 import styles from '../../../ui/amadeus.css';
 import themeStyles from '../../../ui/dsh-theme.css';
 import { reconcileAnnotationDraft, stripAnnotationDraftMarker } from './reader-state.mjs';
@@ -123,6 +125,50 @@ function suppressDesktopUnavailable(ctx) {
 function sourcePath(address) {
   return parseEditableAddress(address).path;
 }
+// A markdown preview renders headings as real <h1>..<h6> nodes, so the nearest
+// preceding heading is the section a selection sits in. Used to build the
+// Obsidian-style source link for a text selection: [[file.md#3.2.3 section]].
+function nearestHeading(scope, node) {
+  const start = node?.nodeType === 1 ? node : node?.parentElement;
+  if (!scope || !start || typeof scope.querySelectorAll !== 'function' || !scope.contains(start)) return '';
+  let heading = '';
+  for (const candidate of scope.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+    // querySelectorAll is document-ordered, so once a heading no longer precedes
+    // the selection every later one follows it as well.
+    if (!(candidate.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING)) break;
+    heading = candidate.textContent.replace(/\s+/g, ' ').trim();
+  }
+  return heading;
+}
+// A single transient toast reused for "/note" feedback, styled by the preview
+// zoom toast rules below.
+let amadeusToast, amadeusToastTimer;
+function showAmadeusToast(message) {
+  if (!amadeusToast) {
+    amadeusToast = document.createElement('div');
+    amadeusToast.className = 'amadeus-preview-zoom-toast';
+    amadeusToast.setAttribute('role', 'status');
+    amadeusToast.setAttribute('aria-live', 'polite');
+    document.body.append(amadeusToast);
+  }
+  amadeusToast.textContent = message;
+  amadeusToast.classList.add('amadeus-preview-zoom-toast-visible');
+  clearTimeout(amadeusToastTimer);
+  amadeusToastTimer = setTimeout(() => amadeusToast.classList.remove('amadeus-preview-zoom-toast-visible'), 1600);
+}
+// "/note" is handled entirely in the browser: the selected原文 + comment + the
+// source double-link are posted to the host, which appends them to the current
+// lesson's "## note" section. The model is never asked, so nothing is answered.
+async function captureAmadeusNote(sessionId, items) {
+  const response = await fetch('/amadeus/reader/note', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, items: items.map(item => ({ text: item.text, comment: item.comment ?? '', source: item.source })) }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(payload?.error || `${tr('写入笔记失败', 'Failed to write note')} (${response.status})`);
+  return payload;
+}
 const denseText = text => text.replace(/\r\n/g, '\n').replace(/\n[\t ]*\n+/g, '\n').trim();
 function AnnotationChip({ annotations }) {
   useAmadeusLocale();
@@ -197,23 +243,28 @@ function decorateAnnotationReferences(root, maximum) {
     textNode.replaceWith(fragment);
   }
 }
-// Amadeus PDF-position links: notes use Obsidian-style [[file.pdf#page=N]] tokens.
+// Amadeus source-position links: notes use Obsidian-style [[file#anchor]] tokens,
+// where a PDF/Office file uses #page=N and a Markdown file uses #<section heading>.
 // The native markdown preview only renders external https links as anchors, so we
 // detect these tokens in text nodes and turn them into clickable buttons.
-const PDF_LINK_PATTERN = /\[\[\s*([^\]|]+?\.pdf)(#[^\]|]*)?(?:\|([^\]]*))?\]\]/gi;
+const PDF_LINK_PATTERN = /\[\[\s*([^\]|]+?\.(?:pdf|markdown|md))(#(?:[^\]|]*))?(?:\|([^\]]*))?\]\]/gi;
 function parsePdfLinkToken(token) {
   const bar = token.indexOf('|');
   const target = (bar >= 0 ? token.slice(0, bar) : token).trim();
   const alias = bar >= 0 ? token.slice(bar + 1).trim() : '';
   const hash = target.indexOf('#');
   const path = (hash >= 0 ? target.slice(0, hash) : target).trim();
-  let page, text = '';
+  let page, text = '', heading = '';
   if (hash >= 0) {
-    const params = new URLSearchParams(target.slice(hash + 1));
+    const fragment = target.slice(hash + 1);
+    const params = new URLSearchParams(fragment);
     if (params.has('page')) { const value = Number(params.get('page')); if (Number.isFinite(value)) page = value; }
     text = params.get('text') || '';
+    heading = (params.get('heading') || '').trim();
+    // An Obsidian-native heading link carries the heading bare (no query string).
+    if (page === undefined && !text && !heading) heading = fragment.trim();
   }
-  return path ? { path, page, text, alias } : null;
+  return path ? { path, page, text, heading, alias } : null;
 }
 function decoratePdfLinks(root) {
   if (!root) return;
@@ -240,8 +291,10 @@ function decoratePdfLinks(root) {
       button.dataset.amadeusPdfPath = parsed.path;
       if (parsed.page !== undefined) button.dataset.amadeusPdfPage = String(parsed.page);
       if (parsed.text) button.dataset.amadeusPdfText = parsed.text;
-      button.setAttribute('aria-label', `${parsed.path}${parsed.page !== undefined ? ` · ${tr('第', 'page')} ${parsed.page} ${tr('页', '')}` : ''}`);
-      button.textContent = parsed.alias || `${parsed.path}${parsed.page !== undefined ? ` p.${parsed.page}` : ''}`;
+      if (parsed.heading) button.dataset.amadeusPdfHeading = parsed.heading;
+      const anchor = parsed.page !== undefined ? `${tr('第', 'page')} ${parsed.page} ${tr('页', '')}` : parsed.heading;
+      button.setAttribute('aria-label', `${parsed.path}${anchor ? ` · ${anchor}` : ''}`);
+      button.textContent = parsed.alias || `${parsed.path}${parsed.page !== undefined ? ` p.${parsed.page}` : (parsed.heading ? ` · ${parsed.heading}` : '')}`;
       fragment.append(button);
       offset = match.index + match[0].length;
     }
@@ -410,22 +463,30 @@ function AnnotationDock({ sessionId, store, useInput, inputActions }) {
 function SelectionPopup({ selection, onSave, onClose, initialEditing = false }) {
   useAmadeusLocale();
   const [editing, setEditing] = useState(initialEditing), [annotation, setAnnotation] = useState(''), [error, setError] = useState('');
-  function save() {
-    try { onSave({ text: selection.text, source: selection.source, annotation }); }
-    catch (error) { setError(error.message); }
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (busy) return;
+    setError('');
+    setBusy(true);
+    try { await onSave({ text: selection.text, source: selection.source, annotation }); }
+    catch (error) { setError(error.message); setBusy(false); }
   }
   function copyLink() {
     const source = selection.source;
     if (!source || source.kind !== 'file') return;
-    const params = [];
-    if (source.pageStart) params.push(`page=${source.pageStart}`);
-    if (selection.text) params.push(`text=${encodeURIComponent(selection.text)}`);
-    const fragment = params.length ? `#${params.join('&')}` : '';
+    let fragment = '';
+    if (source.pageStart) {
+      const params = [`page=${source.pageStart}`];
+      if (selection.text) params.push(`text=${encodeURIComponent(selection.text)}`);
+      fragment = `#${params.join('&')}`;
+    } else if (source.heading) {
+      fragment = `#${source.heading}`;
+    }
     navigator.clipboard?.writeText(`[[${source.path}${fragment}]]`).catch(() => {});
     onClose();
   }
   return <div className={`amadeus-selection ${editing ? 'amadeus-selection-editor' : 'amadeus-selection-prompt'}`} style={{ left: Math.max(8, Math.min(selection.x, innerWidth - (editing ? 308 : 264))), top: Math.max(8, Math.min(selection.y + 6, innerHeight - (editing ? 50 : 38))) }} role={editing ? 'dialog' : undefined} aria-label={tr('添加到对话', 'Add to chat')} onKeyDown={e => { if (e.key === 'Escape') onClose(); }}>
-    {!editing ? <><button className="amadeus-selection-trigger" onMouseDown={e => e.preventDefault()} onClick={() => setEditing(true)}><span aria-hidden="true">＋</span> {tr('添加到对话', 'Add to chat')}</button>{selection.source?.kind === 'file' && <button className="amadeus-selection-trigger amadeus-selection-copy" onMouseDown={e => e.preventDefault()} onClick={copyLink} aria-label={tr('复制位置链接', 'Copy position link')} title={tr('复制位置链接', 'Copy position link')}><span aria-hidden="true">🔗</span> {tr('复制链接', 'Copy link')}</button>}</> : <><input autoFocus type="text" aria-label={tr('针对选中文本的问题', 'Question about selected text')} placeholder={tr('添加可选评论…', 'Add an optional comment…')} value={annotation} onChange={e => setAnnotation(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); save(); } }} /><button type="button" className="amadeus-selection-confirm" aria-label={tr('添加注释', 'Add annotation')} title={tr('添加注释', 'Add annotation')} onClick={save}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4.5 10 3.5 4 7.5-9" /></svg></button>{error && <p role="alert">{error}</p>}</>}
+    {!editing ? <><button className="amadeus-selection-trigger" onMouseDown={e => e.preventDefault()} onClick={() => setEditing(true)}><span aria-hidden="true">＋</span> {tr('添加到对话', 'Add to chat')}</button>{selection.source?.kind === 'file' && <button className="amadeus-selection-trigger amadeus-selection-copy" onMouseDown={e => e.preventDefault()} onClick={copyLink} aria-label={tr('复制位置链接', 'Copy position link')} title={tr('复制位置链接', 'Copy position link')}><span aria-hidden="true">🔗</span> {tr('复制链接', 'Copy link')}</button>}</> : <><input autoFocus type="text" aria-label={tr('针对选中文本的问题', 'Question about selected text')} placeholder={tr('评论，或 /note 记进本课笔记…', 'Comment, or /note to save to the lesson note…')} value={annotation} onChange={e => setAnnotation(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); save(); } }} /><button type="button" className="amadeus-selection-confirm" disabled={busy} aria-label={tr('添加注释', 'Add annotation')} title={tr('添加注释', 'Add annotation')} onClick={save}><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4.5 10 3.5 4 7.5-9" /></svg></button>{error && <p role="alert">{error}</p>}</>}
   </div>;
 }
 function installSelection(ctx, store, activeSession) {
@@ -434,6 +495,17 @@ function installSelection(ctx, store, activeSession) {
   let locked = false, skipMouseUp = false, pointerSelecting = false, selectionTimer;
   function close() { locked = false; root.render(null); }
   function cancel() { close(); window.getSelection()?.removeAllRanges(); }
+  // "/note …" is a quick capture: write it straight to the lesson note without
+  // asking the model. Every other comment keeps the normal add-then-ask flow.
+  async function commitSelection(sessionId, item) {
+    const note = parseNoteCommand(item.annotation);
+    if (note.isNote) {
+      await captureAmadeusNote(sessionId, [{ text: item.text, comment: note.comment, source: item.source }]);
+      showAmadeusToast(tr('已记入本课笔记 note', 'Saved to the lesson note'));
+      return;
+    }
+    store.add(sessionId, item);
+  }
   function fromEditor(event) {
     const detail = event.detail;
     if (!detail?.sessionId || !detail.text?.trim() || detail.source?.kind !== 'file') return;
@@ -441,7 +513,7 @@ function installSelection(ctx, store, activeSession) {
     activeSession.id = detail.sessionId;
     locked = true;
     const sessionId = detail.sessionId;
-    root.render(<SelectionPopup key={`${sessionId}:${detail.text}:editor`} initialEditing selection={{ text: detail.text, source: detail.source, x: detail.x, y: detail.y }} onClose={cancel} onSave={item => { store.add(sessionId, item); close(); }} />);
+    root.render(<SelectionPopup key={`${sessionId}:${detail.text}:editor`} initialEditing selection={{ text: detail.text, source: detail.source, x: detail.x, y: detail.y }} onClose={cancel} onSave={async item => { await commitSelection(sessionId, item); close(); }} />);
   }
   function outsidePointerDown(event) {
     pointerSelecting = true;
@@ -484,6 +556,12 @@ function installSelection(ctx, store, activeSession) {
           source.pageCount = file.querySelectorAll('[data-pdf-page]').length;
         }
       }
+      // Markdown/text previews have no page anchors; capture the section heading
+      // so the annotation carries a [[file.md#heading]] link back to the source.
+      if (source.pageStart === undefined) {
+        const heading = nearestHeading(file, range.startContainer);
+        if (heading) source.heading = heading;
+      }
     } else {
       const message = element?.closest('[data-chat-anchor-key]');
       if (!message || !message.contains(endElement)) return close();
@@ -496,7 +574,7 @@ function installSelection(ctx, store, activeSession) {
     }
     if (!sessionId) return close();
     const rect = range.getBoundingClientRect();
-    root.render(<SelectionPopup key={`${sessionId}:${text}`} selection={{ text, source, x: Math.max(8, rect.left), y: rect.bottom }} onClose={cancel} onSave={item => { store.add(sessionId, item); close(); window.getSelection()?.removeAllRanges(); }} />);
+    root.render(<SelectionPopup key={`${sessionId}:${text}`} selection={{ text, source, x: Math.max(8, rect.left), y: rect.bottom }} onClose={cancel} onSave={async item => { await commitSelection(sessionId, item); close(); window.getSelection()?.removeAllRanges(); }} />);
   }
   function scheduleDetect() {
     clearTimeout(selectionTimer);
@@ -519,6 +597,79 @@ function installSelection(ctx, store, activeSession) {
   window.addEventListener('amadeus:editor-selection', fromEditor);
   return () => { clearTimeout(selectionTimer); document.removeEventListener('pointerdown', outsidePointerDown, true); document.removeEventListener('touchstart', outsidePointerDown, true); document.removeEventListener('pointerup', finishPointerSelection); document.removeEventListener('touchend', finishPointerSelection); document.removeEventListener('pointercancel', cancelPointerSelection); document.removeEventListener('touchcancel', cancelPointerSelection); document.removeEventListener('mouseup', detect); document.removeEventListener('keyup', detect); document.removeEventListener('selectionchange', scheduleDetect); window.removeEventListener('amadeus:editor-selection', fromEditor); root.unmount(); host.remove(); };
 }
+// Cmd/Ctrl + ArrowUp/ArrowDown resizes the sidebar document preview's text,
+// with Cmd/Ctrl + wheel as the fallback for iPad + mouse (or when the OS keeps
+// the arrow combo). Scaling the native body with CSS `zoom` reflows the content
+// inside the pane (transform would overflow) and keeps selection coordinates
+// correct, so the "add to chat" popup stays anchored. Only mounted, visible,
+// zoomable previews enable the shortcut, and PDF/image previews keep their own
+// zoom controls.
+function installPreviewZoom() {
+  const root = document.documentElement;
+  let scale = readPreviewZoom(window.localStorage);
+  let toast, timer;
+  const paint = () => root.style.setProperty('--amadeus-preview-zoom', String(scale));
+  const announce = () => {
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.className = 'amadeus-preview-zoom-toast';
+      toast.setAttribute('role', 'status');
+      toast.setAttribute('aria-live', 'polite');
+      document.body.append(toast);
+    }
+    toast.textContent = `${tr('字号', 'Font size')} ${previewZoomPercent(scale)}%`;
+    toast.classList.add('amadeus-preview-zoom-toast-visible');
+    clearTimeout(timer);
+    timer = setTimeout(() => toast.classList.remove('amadeus-preview-zoom-toast-visible'), 1100);
+  };
+  const apply = next => { scale = next; writePreviewZoom(window.localStorage, scale); paint(); announce(); };
+  const hasVisiblePreview = () => {
+    for (const wrapper of document.querySelectorAll('[data-amadeus-zoomable]')) {
+      const rect = wrapper.firstElementChild?.getBoundingClientRect();
+      if (rect && rect.width > 0 && rect.height > 0) return true;
+    }
+    return false;
+  };
+  const onKeyDown = event => {
+    if (event.isComposing) return;
+    if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('input,textarea,select')) return;
+    if (!hasVisiblePreview()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    apply(stepPreviewZoom(scale, event.key === 'ArrowUp' ? 1 : -1));
+  };
+  // Cmd/Ctrl + wheel is the fallback for iPad + mouse, or when the OS swallows
+  // Cmd+Arrow. The listener must be non-passive to cancel the page zoom/scroll.
+  let wheelRemainder = 0, wheelIdle;
+  const onWheel = event => {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+    if (!hasVisiblePreview()) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const { steps, remainder } = consumeWheelZoom(wheelRemainder, event.deltaY, event.deltaMode);
+    wheelRemainder = remainder;
+    clearTimeout(wheelIdle);
+    wheelIdle = setTimeout(() => { wheelRemainder = 0; }, 180);
+    if (steps === 0) return;
+    let next = scale;
+    for (let index = 0; index < Math.abs(steps); index++) next = stepPreviewZoom(next, steps > 0 ? -1 : 1);
+    if (next !== scale) apply(next);
+  };
+  paint();
+  document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('wheel', onWheel, { capture: true, passive: false });
+  return () => {
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.removeEventListener('wheel', onWheel, true);
+    clearTimeout(timer);
+    clearTimeout(wheelIdle);
+    toast?.remove();
+    root.style.removeProperty('--amadeus-preview-zoom');
+  };
+}
 export function apply(ctx) {
   setAmadeusLocale(ctx.locale);
   ctx.effect(() => ctx.slots.inject('settings.trigger', () => installConnectionLatency(ctx)));
@@ -536,9 +687,10 @@ export function apply(ctx) {
     if (source?.kind !== 'file') return;
     const sessionId = activeSession.id;
     if (!sessionId) return;
-    ctx.sidebarRight.openResource(sessionFileAddress(sessionId, source.path), { params: { amadeusAnnotation: { page: source.pageStart, text: annotation.text } } });
+    ctx.sidebarRight.openResource(sessionFileAddress(sessionId, source.path), { params: { amadeusAnnotation: { page: source.pageStart, text: annotation.text, heading: source.heading } } });
   };
   ctx.effect(installBrandFavicon);
+  ctx.effect(installPreviewZoom);
   ctx.effect(() => ctx.slots.inject('sidebar.brand.mark', () => replaceBrandSlot(ctx, 'sidebar.brand.mark', AmadeusBrandMark)));
   ctx.effect(() => ctx.slots.inject('sidebar.brand.name', () => replaceBrandSlot(ctx, 'sidebar.brand.name', AmadeusBrandName)));
   ctx.effect(() => ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'amadeus-conversation-collapse', order: 10 }, props => <ConversationCollapse {...props} sidebarRight={ctx.sidebarRight} />)));
@@ -547,7 +699,7 @@ export function apply(ctx) {
   ctx.effect(() => ctx.slots.inject('conversation.input.dock', () => delayQueueDock(ctx)));
   ctx.effect(() => ctx.slots.inject('conversation.chat.turnTail', () => suppressDesktopUnavailable(ctx)));
   ctx.effect(() => { const style = document.createElement('style'); style.textContent = `${styles + themeStyles}\n/* Native sidebar PDF/Office text layer: the theme's hover-accent selection is nearly invisible; the lazy PDF chunk also inserts its CSS after ours, so win the tie with !important. */\n[data-pdf-text] ::selection{background:rgba(68,118,254,.45)!important}`; document.head.append(style); return () => style.remove(); });
-  ctx.effect(() => { const style = document.createElement('style'); style.textContent = `.amadeus-pdf-link{display:inline-flex;align-items:center;gap:3px;font:inherit;line-height:1.5;padding:0 .35em;margin:0 .1em;border:0;border-radius:4px;background:rgba(68,118,254,.14);color:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}.amadeus-pdf-link:hover{background:rgba(68,118,254,.26)}.amadeus-selection-copy{margin-left:6px}@keyframes amadeus-page-flash{0%,100%{outline-color:rgba(68,118,254,.95);box-shadow:0 0 0 6px rgba(68,118,254,.34)}50%{outline-color:rgba(68,118,254,.35);box-shadow:0 0 0 10px rgba(68,118,254,.12)}}.amadeus-page-flash{outline:6px solid rgba(68,118,254,.95);outline-offset:-6px;box-shadow:0 0 0 6px rgba(68,118,254,.34);animation:amadeus-page-flash 1.2s ease-in-out 0s 3}.amadeus-quote-highlight{background:rgba(68,118,254,.32)!important;border-radius:2px;box-shadow:0 0 0 1px rgba(68,118,254,.45)!important}`; document.head.append(style); return () => style.remove(); });
+  ctx.effect(() => { const style = document.createElement('style'); style.textContent = `.amadeus-pdf-link{display:inline-flex;align-items:center;gap:3px;font:inherit;line-height:1.5;padding:0 .35em;margin:0 .1em;border:0;border-radius:4px;background:rgba(68,118,254,.14);color:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}.amadeus-pdf-link:hover{background:rgba(68,118,254,.26)}.amadeus-selection-copy{margin-left:6px}@keyframes amadeus-page-flash{0%,100%{outline-color:rgba(68,118,254,.95);box-shadow:0 0 0 6px rgba(68,118,254,.34)}50%{outline-color:rgba(68,118,254,.35);box-shadow:0 0 0 10px rgba(68,118,254,.12)}}.amadeus-page-flash{outline:6px solid rgba(68,118,254,.95);outline-offset:-6px;box-shadow:0 0 0 6px rgba(68,118,254,.34);animation:amadeus-page-flash 1.2s ease-in-out 0s 3}.amadeus-quote-highlight{background:rgba(68,118,254,.32)!important;border-radius:2px;box-shadow:0 0 0 1px rgba(68,118,254,.45)!important}.amadeus-heading-highlight{background:rgba(68,118,254,.24)!important;border-radius:4px;box-shadow:0 0 0 6px rgba(68,118,254,.18)!important}.amadeus-source-document[data-amadeus-zoomable]>*{zoom:var(--amadeus-preview-zoom,1)}.amadeus-preview-zoom-toast{position:fixed;left:50%;bottom:32px;z-index:9999;transform:translate(-50%,8px);padding:6px 14px;border-radius:999px;background:var(--dsw-alias-bg-layer-2,#2a2a2c);color:var(--dsw-alias-label-primary,#fff);font:500 13px/1.4 system-ui,sans-serif;box-shadow:0 6px 20px #0003;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease}.amadeus-preview-zoom-toast-visible{opacity:.96;transform:translate(-50%,0)}`; document.head.append(style); return () => style.remove(); });
   // Add selection provenance around native document bodies (text, PDF, Office)
   // without replacing their rendering, and honor annotation page jumps.
   ctx.effect(() => ctx.slots.inject('sidebar.right.tab.document', () => {
@@ -630,6 +782,46 @@ export function apply(ctx) {
             reveal();
             return () => { observer.disconnect(); for (const timer of timers) clearTimeout(timer); if (detach) detach(); };
           }, [focus?.page, focus?.text, navigation?.revision]);
+          // Markdown source links jump by section heading instead of page: reveal
+          // (and briefly highlight) the matching <h1>..<h6> once the preview renders.
+          useEffect(() => {
+            const heading = focus?.heading;
+            const element = host.current;
+            if (!heading || !element) return;
+            const doc = element.ownerDocument;
+            const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+            const target = normalize(heading);
+            if (!target) return;
+            let marked = null;
+            const clear = () => { if (marked) { marked.classList.remove('amadeus-heading-highlight'); marked = null; } };
+            const find = () => {
+              for (const node of element.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+                const value = normalize(node.textContent);
+                if (value === target || value.startsWith(target) || target.startsWith(value)) return node;
+              }
+              return null;
+            };
+            const reveal = () => {
+              if (marked && marked.isConnected) return;
+              const node = find();
+              if (!node) return;
+              clear();
+              marked = node;
+              node.classList.add('amadeus-heading-highlight');
+              node.scrollIntoView({ block: 'start' });
+            };
+            reveal();
+            const observer = new doc.defaultView.MutationObserver(reveal);
+            observer.observe(element, { childList: true, subtree: true });
+            const dismiss = () => clear();
+            const armed = setTimeout(() => {
+              doc.addEventListener('pointerdown', dismiss, true);
+              doc.addEventListener('wheel', dismiss, true);
+              doc.addEventListener('touchstart', dismiss, true);
+              doc.addEventListener('keydown', dismiss, true);
+            }, 1500);
+            return () => { observer.disconnect(); clearTimeout(armed); clear(); doc.removeEventListener('pointerdown', dismiss, true); doc.removeEventListener('wheel', dismiss, true); doc.removeEventListener('touchstart', dismiss, true); doc.removeEventListener('keydown', dismiss, true); };
+          }, [focus?.heading, navigation?.revision]);
           useLayoutEffect(() => {
             const element = host.current;
             if (!element) return;
@@ -649,7 +841,7 @@ export function apply(ctx) {
             if (!sessionId) return;
             const address = sessionFileAddress(sessionId, target.dataset.amadeusPdfPath);
             const page = target.dataset.amadeusPdfPage !== undefined ? Number(target.dataset.amadeusPdfPage) : undefined;
-            ctx.sidebarRight.openResource(address, { params: { amadeusAnnotation: { page, text: target.dataset.amadeusPdfText || '' } }, preferNewPane: true });
+            ctx.sidebarRight.openResource(address, { params: { amadeusAnnotation: { page, text: target.dataset.amadeusPdfText || '', heading: target.dataset.amadeusPdfHeading || '' } }, preferNewPane: true });
           };
           const onPdfLink = event => {
             const target = event.target instanceof Element ? event.target.closest('[data-amadeus-pdf-path]') : null;
@@ -660,7 +852,8 @@ export function apply(ctx) {
           };
           let path;
           try { path = sourcePath(props.resourceAddress); } catch { return <Native {...displayProps} />; }
-          return <div ref={host} className="amadeus-source-document" style={{ display: 'contents' }} data-amadeus-path={path} data-amadeus-format={path.split('.').pop().toLowerCase()} data-amadeus-session={props.sessionId} onClick={onPdfLink}><Native {...displayProps} /></div>;
+          const format = path.split('.').pop().toLowerCase();
+          return <div ref={host} className="amadeus-source-document" style={{ display: 'contents' }} data-amadeus-path={path} data-amadeus-format={format} data-amadeus-zoomable={isZoomableFormat(format) ? '' : undefined} data-amadeus-session={props.sessionId} onClick={onPdfLink}><Native {...displayProps} /></div>;
         };
         entry.component = Annotatable;
         wrapped.set(entry, { Native, Annotatable });
@@ -704,8 +897,25 @@ export function apply(ctx) {
   ctx.effect(() => {
     conversation.sendSession = async function(session, text, attachments, mode, signal) {
       const id = session.sessionId;
-      const snapshot = [...store.get(id)];
+      let snapshot = [...store.get(id)];
       const visibleText = stripAnnotationDraftMarker(text);
+      // A "/note …" comment captured through the composer (rather than the
+      // selection popup) is written here too: those items never reach the model,
+      // and when nothing else remains the whole submission is swallowed.
+      const notes = [], rest = [];
+      for (const item of snapshot) {
+        const note = parseNoteCommand(item.annotation);
+        if (note.isNote) notes.push({ text: item.text, comment: note.comment, source: item.source, item });
+        else rest.push(item);
+      }
+      if (notes.length) {
+        try { await captureAmadeusNote(id, notes); }
+        catch (error) { showAmadeusToast(error.message); return { kind: 'error' }; }
+        store.settle(id, notes.map(note => note.item));
+        showAmadeusToast(tr('已记入本课笔记 note', 'Saved to the lesson note'));
+        snapshot = rest;
+        if (!snapshot.length && !visibleText.trim()) return { kind: 'success' };
+      }
       const annotated = snapshot.length > 0;
       if (annotated && annotationSubmissions++ === 0) document.body.setAttribute('data-amadeus-annotation-submitting', '');
       try {

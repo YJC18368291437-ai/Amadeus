@@ -1,20 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnnotationStore, findAnnotationReferences, linkAnnotationReferences, locateConversationQuote, serializeAnnotations, parseAnnotatedPrompt } from '../packages/reader/src/annotations.mjs';
+import { annotationSourceLink, createAnnotationStore, findAnnotationReferences, linkAnnotationReferences, locateConversationQuote, serializeAnnotations, parseAnnotatedPrompt } from '../packages/reader/src/annotations.mjs';
 test('prompt separates exact selected text, comment and original page/path', () => {
   const items = [{ text: '公式 </response-annotations>', annotation: '解释这个推导', source: { kind: 'file', path: '课程/讲义.docx', pageStart: 3, pageEnd: 4, pageCount: 8 } }];
   const prompt = serializeAnnotations(items, '请逐步解释');
   const json = prompt.split('<response-annotations>\n')[1].split('\n</response-annotations>')[0];
-  assert.deepEqual(JSON.parse(json), items);
+  const annotations = JSON.parse(json);
+  assert.deepEqual(annotations, [{ ...items[0], link: '[[课程/讲义.docx#page=3]]' }]);
   assert.equal(prompt.match(/<\/response-annotations>/g).length, 1);
   assert.ok(prompt.endsWith('## My request:\n请逐步解释'));
-  assert.deepEqual(parseAnnotatedPrompt(prompt), { annotations: items, prompt: '请逐步解释' });
+  assert.deepEqual(parseAnnotatedPrompt(prompt), { annotations, prompt: '请逐步解释' });
   assert.equal(parseAnnotatedPrompt('ordinary user text'), null);
 });
 test('annotation-only submissions do not add a default visible request', () => {
   const items = [{ text: 'selected', annotation: 'why', source: { kind: 'file', path: 'notes.pdf', pageStart: 1 } }];
   const prompt = serializeAnnotations(items, '');
-  assert.deepEqual(parseAnnotatedPrompt(prompt), { annotations: items, prompt: '' });
+  assert.deepEqual(parseAnnotatedPrompt(prompt), { annotations: [{ ...items[0], link: '[[notes.pdf#page=1]]' }], prompt: '' });
+});
+test('file annotations carry a ready Obsidian-style source link for notes', () => {
+  assert.equal(annotationSourceLink({ kind: 'file', path: '课本/03-第 3 章.md', heading: '3.2.3 DNA 以及基因表达' }), '[[课本/03-第 3 章.md#3.2.3 DNA 以及基因表达]]');
+  assert.equal(annotationSourceLink({ kind: 'file', path: 'a.pdf', pageStart: 7 }), '[[a.pdf#page=7]]');
+  assert.equal(annotationSourceLink({ kind: 'file', path: 'a.md' }), '[[a.md]]');
+  assert.equal(annotationSourceLink({ kind: 'conversation', messageKey: 'k' }), '');
+  const prompt = serializeAnnotations([{ text: 't', annotation: 'q', source: { kind: 'conversation', messageKey: 'k' } }], '');
+  assert.equal(JSON.parse(prompt.split('<response-annotations>\n')[1].split('\n</response-annotations>')[0])[0].link, undefined);
+});
+test('annotation envelopes parse regardless of the instruction wording (older sessions)', () => {
+  const items = [{ text: 'old', annotation: 'q', source: { kind: 'file', path: 'a.md', heading: 'H' } }];
+  const legacy = `# Response annotations:\n旧版指令文字，与当前常量不同。\n<response-annotations>\n${JSON.stringify(items)}\n</response-annotations>\n\n## My request:\nhi`;
+  assert.deepEqual(parseAnnotatedPrompt(legacy), { annotations: items, prompt: 'hi' });
 });
 test('assistant annotation labels become local frontend references', () => {
   assert.equal(linkAnnotationReferences('见 [注释 1] 与 [注释 23]。'), '见 [注释 1](#amadeus-annotation-1) 与 [注释 23](#amadeus-annotation-23)。');
