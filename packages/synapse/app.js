@@ -46,6 +46,10 @@
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
+  // iPad / touch: tapping the swatch should open the native colour picker.
+  // Mouse desktops (Windows): use the preset palette popover instead.
+  const USE_NATIVE_PICKER = window.matchMedia?.('(pointer: coarse)').matches === true
+
   // ---------------------------------------------------------------- state ----
 
   const state = {
@@ -258,8 +262,8 @@
   // -------------------------------------------------- layered ring layout ---
 
   const rawById = new Map()
-  const RING_MAX = 20
-  const RELATED_MAX = 19
+  const RING_MAX = 6
+  const RELATED_MAX = RING_MAX - 1
 
   const byTimeDesc = list => list.slice().sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0))
   const projectMembers = name => byTimeDesc(state.raw.nodes.filter(node => node.project === name))
@@ -1341,10 +1345,22 @@
       const chip = el('div', { class: 'graph-chip' }, legend)
       chip.dataset.project = project.name
       chip.classList.toggle('is-off', state.hiddenProjects.has(project.name))
-      // Swatch button opens a small palette (preset low-sat colours + custom).
-      const dot = el('button', { class: 'graph-chip-dot', type: 'button', title: `给「${project.name}」选颜色` }, chip)
-      dot.style.background = color
-      dot.addEventListener('click', event => { event.stopPropagation(); openPalette(project.name, dot) })
+      // Swatch: native picker on touch (iPad), preset palette on mouse desktop.
+      let dot
+      if (USE_NATIVE_PICKER) {
+        dot = el('label', { class: 'graph-chip-dot', title: `给「${project.name}」选颜色` }, chip)
+        dot.style.background = color
+        const input = el('input', { type: 'color', class: 'graph-chip-color' }, dot)
+        input.value = /^#[0-9a-f]{6}$/i.test(color) ? color : '#888888'
+        input.addEventListener('click', event => event.stopPropagation())
+        const onPick = () => { setProjectColor(project.name, input.value); dot.style.background = input.value }
+        input.addEventListener('input', onPick)
+        input.addEventListener('change', onPick)
+      } else {
+        dot = el('button', { class: 'graph-chip-dot', type: 'button', title: `给「${project.name}」选颜色` }, chip)
+        dot.style.background = color
+        dot.addEventListener('click', event => { event.stopPropagation(); openPalette(project.name, dot) })
+      }
       const toggle = el('button', { class: 'graph-chip-label', type: 'button', title: `只看/隐藏「${project.name}」` }, chip)
       toggle.append(el('span', { class: 'graph-chip-name', text: project.name }))
       toggle.append(el('span', { class: 'graph-chip-count', text: String(count) }))
