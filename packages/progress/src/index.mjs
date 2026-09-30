@@ -7,7 +7,7 @@ import { HttpError, json, routeErrors, sessionRoot } from '../../files/src/works
 export const inject = ['webServer', 'sessions'];
 
 const execFileAsync = promisify(execFile);
-const PYTHON = '/srv/amadeus/bci-venv/bin/python';
+const PYTHON = process.env.AMADEUS_PYTHON || 'python3';
 const SKIP_DIRS = new Set(['node_modules', '.git', '.ipynb_checkpoints', '.mne_data', '.mplcache', '.obsidian', '.uvcache']);
 
 function parseLastJson(text) {

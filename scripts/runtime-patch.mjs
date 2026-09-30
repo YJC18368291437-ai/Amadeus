@@ -86,7 +86,7 @@ export function createRuntimePatch({ root, home, config }) {
     { id: 'amadeus-editor', name: plugin('editor'), config: { stateDir: path.join(home, 'editor'), upstream: config.editor?.upstream || 'http://127.0.0.1:8080', bridgeDir: config.editor?.bridgeDir || process.env.AMADEUS_EDITOR_BRIDGE_DIR || path.join(home, 'editor/bridge') } },
     { id: 'amadeus-study-title', name: plugin('study-title') },
     { id: 'amadeus-jupyter', name: plugin('jupyter'), config: { url: config.jupyterUrl } },
-    { id: 'amadeus-progress', name: plugin('progress'), config: { jupyterUrl: config.jupyterUrl } },
+    { id: 'amadeus-progress', name: plugin('progress'), config: { jupyterUrl: config.jupyterUrl, python: config.python } },
     { id: 'amadeus-synapse', name: plugin('synapse'), config: { dataFile: path.join(home, 'synapse/workspaces.json').replaceAll('\\', '/'), exportDir: path.join(home, 'synapse/exports').replaceAll('\\', '/'), autoProjection: true, projectionWorkspaceTitle: 'DSH 任务' } },
   ];
   const playwrightMcpPlugin = resolvePlaywrightMcpPlugin({ root, home, config });

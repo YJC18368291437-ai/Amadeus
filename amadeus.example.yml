@@ -11,6 +11,10 @@ sessionHours: 12
 maxUploadBytes: 1073741824
 # Maximum complete-file read for native PDF/file previews (256 MiB); restart after changing.
 maxPreviewBytes: 268435456
+# Optional: Python interpreter used by the study panel. Defaults to `python3`.
+# python: /path/to/venv/bin/python
+# Optional: JupyterLab URL shown by the study panel.
+# jupyterUrl: http://127.0.0.1:8888/
 # Embedded code-server (Docker configures these paths automatically).
 # editor:
 #   upstream: http://127.0.0.1:8080

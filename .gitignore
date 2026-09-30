@@ -15,3 +15,5 @@ tmp/
 /bci-venv/
 /vnc/
 /jupyter/
+# Personal, machine-specific helper scripts (kept locally, never published).
+scripts/vnc-session.sh
