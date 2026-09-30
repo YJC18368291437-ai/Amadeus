@@ -94,11 +94,16 @@ export function EditorTab({ useTabInfo, sessionId }) {
   const [browserId, setBrowserId] = useState('');
   const query = new URLSearchParams({ session: session || '', instance: `${tab.id}-${browserId}` }).toString();
   const [url, setUrl] = useState(''), [error, setError] = useState(''), [ready, setReady] = useState(false), [loaded, setLoaded] = useState(false), [retry, setRetry] = useState(0);
+  const [waited, setWaited] = useState(0);
+  // The workbench iframe is shared per workspace folder (the server returns it),
+  // so two editor surfaces on the same folder reuse one code-server window.
+  const [workRoot, setWorkRoot] = useState('');
   const [selection, setSelection] = useState(null);
   const [syncConflicts, setSyncConflicts] = useState({});
   const [syncError, setSyncError] = useState('');
   const workspaceSync = useRef(null);
   const recovering = useRef(false);
+  const everReady = useRef(false);
   const selectionHovered = useRef(false);
   const suppressedSelection = useRef(null);
   useEffect(() => { suppressedSelection.current = null; }, [retry]);
@@ -110,6 +115,14 @@ export function EditorTab({ useTabInfo, sessionId }) {
   }).then(responseJson);
 
   useEffect(() => { let live = true; browserIdentity.then(value => { if (live) setBrowserId(value); }, err => { if (live) setError(err.message); }); return () => { live = false; }; }, []);
+  // Tick a counter while the workbench is still loading, so a slow remote link
+  // is visibly "loading (Ns)" instead of an indistinguishable blank pane.
+  useEffect(() => {
+    if ((ready && loaded) || error) { setWaited(0); return; }
+    setWaited(0);
+    const timer = setInterval(() => setWaited(value => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [ready, loaded, error, retry]);
   useEffect(() => {
     if (!session || !browserId) return;
     const key = closeKey(session, tab.id), check = () => command('status');
@@ -119,9 +132,9 @@ export function EditorTab({ useTabInfo, sessionId }) {
 
   useLayoutEffect(() => {
     if (!url || !frame.current) return;
-    return attachWorkbench({ key: closeKey(session, tab.id), url, placeholder: frame.current, signal: tab.signal,
+    return attachWorkbench({ key: workRoot || closeKey(session, tab.id), url, placeholder: frame.current, signal: tab.signal,
       visible: tab.visible !== false && ready && loaded, revision: retry, onLoad: () => setLoaded(true), onDispose: () => { closeChecks.delete(closeKey(session, tab.id)); openedNavigations.delete(closeKey(session, tab.id)); } });
-  }, [url, session, tab.id, tab.signal, tab.visible, ready, loaded, retry]);
+  }, [url, workRoot, session, tab.id, tab.signal, tab.visible, ready, loaded, retry]);
 
   useEffect(() => {
     if (!ready) return;
@@ -140,9 +153,12 @@ export function EditorTab({ useTabInfo, sessionId }) {
         setSyncError('');
       },
       onMissing: ({ path }) => setSyncConflicts(current => ({ ...current, [path]: 'missing' })),
-      onError: ({ error }) => {
+      onError: ({ error, path }) => {
         setSyncError(error?.message || tr('无法监听工作区文件变化。', 'Could not watch workspace file changes.'));
-        beginEditorRecovery();
+        // A per-file watch error is not an outage; rebuilding the whole editor
+        // for it only makes the pane flicker. Only a failed document-events
+        // stream (no path) means the backend connection actually dropped.
+        if (!path) beginEditorRecovery();
       },
       onConnected: () => setSyncError(''),
       // Fast path for browsers whose EventSource re-fires `open` after a drop.
@@ -165,7 +181,7 @@ export function EditorTab({ useTabInfo, sessionId }) {
   useEffect(() => {
     if (!loaded) return;
     let doc;
-    try { doc = getWorkbenchFrame(closeKey(session, tab.id))?.contentDocument; } catch {}
+    try { doc = getWorkbenchFrame(workRoot || closeKey(session, tab.id))?.contentDocument; } catch {}
     if (!doc) return;
     const onKeyDown = event => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
@@ -187,13 +203,13 @@ export function EditorTab({ useTabInfo, sessionId }) {
     };
     doc.addEventListener('keydown', onKeyDown, true);
     return () => doc.removeEventListener('keydown', onKeyDown, true);
-  }, [loaded, session, tab.id, browserId]);
+  }, [loaded, session, tab.id, browserId, workRoot]);
 
   useEffect(() => {
     if (!session || !browserId) return;
     const controller = new AbortController();
     setReady(false); setLoaded(false); setError('');
-    fetch(`/amadeus/editor/workspace?${query}`, { signal: controller.signal }).then(responseJson).then(body => setUrl(body.url)).catch(err => { if (!controller.signal.aborted) setError(err.message); });
+    fetch(`/amadeus/editor/workspace?${query}`, { signal: controller.signal }).then(responseJson).then(body => { setWorkRoot(typeof body.root === 'string' ? body.root : ''); setUrl(body.url); }).catch(err => { if (!controller.signal.aborted) setError(err.message); });
     return () => controller.abort();
   }, [session, tab.id, browserId, retry]);
 
@@ -206,39 +222,30 @@ export function EditorTab({ useTabInfo, sessionId }) {
       try {
         await command('status', {}, controller.signal);
         if (disposed) return;
+        everReady.current = true;
         setReady(true);
         if (file) {
-          const key = closeKey(session, tab.id);
-          const navigation = JSON.stringify([address, tab.navigation.revision]);
-          const storageKey = `amadeus.editor.navigation.${session}.${tab.id}.${browserId}`;
-          let previous = openedNavigations.get(key);
-          if (!previous) { try { previous = sessionStorage.getItem(storageKey); } catch {} }
-          // The navigation cache only records what we last asked for, not what the
-          // workbench still shows. code-server can drop an opened file on its own —
-          // a workbench reload, an extension-host restart, or another editor tab
-          // switching code-server's single workspace — while this tab keeps the
-          // file name and leaves an empty editor. Confirm against the bridge and
-          // re-open whenever the file is gone, not only when the navigation changed.
-          let retained = false;
-          if (previous === navigation) {
-            try { retained = (await command('opened', { path: file.path }, controller.signal)).opened === true; } catch { retained = false; }
-          }
-          if (previous !== navigation || !retained) {
-            await command('open', { path: file.path, text: tab.navigation.params?.amadeusAnnotation?.text }, controller.signal);
-            openedNavigations.set(key, navigation);
-            try { sessionStorage.setItem(storageKey, navigation); } catch {}
-          }
+          // Always (re)open the requested file. `open` is idempotent and leaves the
+          // cursor alone (no text/line is sent), whereas a cached "already open"
+          // flag is exactly what left the pane blank: the workbench can drop or
+          // background the file (a reload, an extension-host restart, another tab),
+          // and the cache — mirrored into sessionStorage — would then skip opening
+          // it forever. Reopening is the only reliable guarantee that the file is
+          // the one actually on screen.
+          await command('open', { path: file.path, text: tab.navigation.params?.amadeusAnnotation?.text }, controller.signal);
+          openedNavigations.set(closeKey(session, tab.id), JSON.stringify([address, tab.navigation.revision]));
         }
         if (!disposed) setError('');
       } catch (err) {
         if (disposed) return;
         if (err.status === 503) {
-          // The bridge only answers after code-server reloads the workspace. If it
-          // stays silent — a kept-alive iframe holding a dead session, or an
-          // outage the document-events stream never reported — kick off the frame
-          // rebuild loop instead of polling forever, and never abandon the wait on
-          // the old 90s deadline so a slow restart can still recover.
-          if (Date.now() - startedAt > 4000) beginEditorRecovery();
+          // The bridge only answers after code-server finishes loading the
+          // workspace, which over a slow remote link can take well over four
+          // seconds. Only rebuild when a frame that HAD connected went away
+          // (everReady, reset on every rebuild); a first load is never
+          // interrupted, so a slow link still gets to finish instead of
+          // reloading forever and staying blank.
+          if (everReady.current && Date.now() - startedAt > 4000) beginEditorRecovery();
           timer = setTimeout(open, 300);
           return;
         }
@@ -255,24 +262,33 @@ export function EditorTab({ useTabInfo, sessionId }) {
   // never fight the active tab for code-server's single workspace.
   useEffect(() => {
     if (!ready || !loaded || !file || !session || !browserId || tab.visible === false) return;
-    let stopped = false, timer, pending = false;
+    let stopped = false, timer, pending = false, misses = 0;
     const verify = async () => {
       if (stopped) return;
       if (!document.hidden && !pending) {
         pending = true;
         try {
           const state = await command('opened', { path: file.path });
-          if (!stopped && state.opened === false) {
-            const key = closeKey(session, tab.id);
-            const navigation = JSON.stringify([address, tab.navigation.revision]);
-            await command('open', { path: file.path, text: tab.navigation.params?.amadeusAnnotation?.text });
-            openedNavigations.set(key, navigation);
-            try { sessionStorage.setItem(`amadeus.editor.navigation.${session}.${tab.id}.${browserId}`, navigation); } catch {}
+          if (!stopped) {
+            if (state.opened === false) {
+              // Require two consecutive misses so a transient blip (a reload, a
+              // focus change) never makes the client re-open and flicker the file.
+              misses += 1;
+              if (misses >= 2) {
+                misses = 0;
+                await command('open', { path: file.path, text: tab.navigation.params?.amadeusAnnotation?.text });
+              }
+            } else misses = 0;
           }
-        } catch { /* bridge busy or gone; the open effect owns backend recovery */ }
+        } catch (error) {
+          // A previously-working bridge that is now gone should recover even if
+          // the document-events stream never reported it (some iPad Safari tabs
+          // suspend EventSource while backgrounded).
+          if (error?.status === 503 && everReady.current) beginEditorRecovery();
+        }
         finally { pending = false; }
       }
-      if (!stopped) timer = setTimeout(verify, 4000);
+      if (!stopped) timer = setTimeout(verify, 8000);
     };
     void verify();
     return () => { stopped = true; clearTimeout(timer); };
@@ -302,7 +318,7 @@ export function EditorTab({ useTabInfo, sessionId }) {
               if (suppressedSelection.current === identity) setSelection(null);
               else {
                 suppressedSelection.current = null;
-                const iframe = getWorkbenchFrame(closeKey(session, tab.id));
+                const iframe = getWorkbenchFrame(workRoot || closeKey(session, tab.id));
                 const bounds = iframe?.getBoundingClientRect();
                 let selected;
                 try { selected = iframe?.contentDocument?.querySelector('.monaco-editor .selected-text')?.getBoundingClientRect(); } catch {}
@@ -318,11 +334,11 @@ export function EditorTab({ useTabInfo, sessionId }) {
           }
         } catch { if (!stopped && !selectionHovered.current) setSelection(null); }
       }
-      if (!stopped) timer = setTimeout(inspect, 450);
+      if (!stopped) timer = setTimeout(inspect, 900);
     };
     void inspect();
     return () => { stopped = true; clearTimeout(timer); };
-  }, [ready, loaded, tab.visible, session, browserId]);
+  }, [ready, loaded, tab.visible, session, browserId, workRoot]);
 
   useLayoutEffect(() => {
     const host = holder.current?.parentElement, pane = host?.parentElement;
@@ -349,6 +365,7 @@ export function EditorTab({ useTabInfo, sessionId }) {
     void command('fontSize', { size: next }).catch(error => setError(error.message));
   }
   function rebuildEditor() {
+    everReady.current = false;
     openedNavigations.delete(closeKey(session, tab.id));
     try { sessionStorage.removeItem(`amadeus.editor.navigation.${session}.${tab.id}.${browserId}`); } catch {}
     setRetry(Date.now());
@@ -367,6 +384,9 @@ export function EditorTab({ useTabInfo, sessionId }) {
     let attempts = 0;
     const attempt = async () => {
       attempts += 1;
+      // If the bridge already answers, the connection just recovered from a
+      // transient blip — tearing the workbench down would only make it flicker.
+      try { await command('status'); recovering.current = false; return; } catch { /* backend is really down */ }
       rebuildEditor();
       await new Promise(resolve => setTimeout(resolve, 2500));
       try { await command('status'); recovering.current = false; }
@@ -376,7 +396,7 @@ export function EditorTab({ useTabInfo, sessionId }) {
   }
   if (!session) return <p>{tr('请从文件列表打开要编辑的文件。', 'Open a file from the file list to edit it.')}</p>;
   return <section className="amadeus-code-workbench" ref={holder}>
-    {(!ready || !loaded) && !error && <div className="amadeus-code-loading" role="status">{tr('正在连接编辑器…', 'Connecting to editor…')}</div>}
+    {(!ready || !loaded) && !error && <div className="amadeus-code-loading" role="status">{tr('正在连接编辑器…', 'Connecting to editor…')}{waited > 3 ? ` ${waited}s` : ''}</div>}
     {error && <div className="amadeus-code-error" role="alert">{error} <button onClick={() => beginEditorRecovery()}>{tr('重试连接', 'Retry connection')}</button></div>}
     {syncError && <div className="amadeus-code-sync-notice" role="status">{tr('文件变更监听暂不可用，编辑器原生监听仍会继续工作。', 'File change notifications are unavailable; the editor’s native watcher remains active.')}</div>}
     {Object.entries(syncConflicts).map(([path, state]) => <div className="amadeus-code-sync-notice" role="alert" key={path}>

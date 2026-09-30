@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createCodeServerProxy } from './proxy.mjs';
 import { sessionRoot, json, routeErrors, HttpError } from '../../files/src/workspace.mjs';
-import { prepareWorkspace, editorFile, bridgeCommand, bridgeEvents } from './workspace.mjs';
+import { prepareWorkspace, editorFile, editorKey, bridgeCommand, bridgeEvents } from './workspace.mjs';
 import { createBackgroundRefresh } from './background-refresh.mjs';
 
 export const inject = ['webServer', 'sessions', 'fs'];
@@ -35,9 +35,12 @@ export async function apply(ctx, config = {}) {
     const root = await sessionRoot(ctx, sessionId);
     const instance = url.searchParams.get('instance');
     if (!instance || instance.length > 256) throw new HttpError(400, 'Editor instance is required');
-    const bridgeId = JSON.stringify([sessionId, instance]);
+    // A single workbench per workspace folder: the id never includes the session
+    // or tab, so every editor surface pointing at the same folder shares one
+    // code-server window (two windows on one folder otherwise drop the folder).
+    const id = editorKey(root);
     if (url.pathname === '/amadeus/editor/workspace' && req.method === 'GET') {
-      return json(res, 200, await prepareWorkspace({ sessionId: bridgeId, root, stateDir }));
+      return json(res, 200, await prepareWorkspace({ root, stateDir }));
     }
     if (url.pathname === '/amadeus/editor/events' && req.method === 'GET') {
       const controller = new AbortController();
@@ -45,7 +48,7 @@ export async function apply(ctx, config = {}) {
       req.once('aborted', abort);
       res.once('close', abort);
       try {
-        const stream = await bridgeEvents({ sessionId: bridgeId, root, bridgeDir, signal: controller.signal });
+        const stream = await bridgeEvents({ id, root, bridgeDir, signal: controller.signal });
         res.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-cache, no-transform',
@@ -103,6 +106,6 @@ export async function apply(ctx, config = {}) {
       if (!Number.isInteger(command.size) || command.size < 10 || command.size > 36) throw new HttpError(400, 'Invalid editor font size');
       input.size = command.size;
     }
-    json(res, 200, await bridgeCommand({ sessionId: bridgeId, root, bridgeDir, command: input }));
+    json(res, 200, await bridgeCommand({ id, root, bridgeDir, command: input }));
   }) }));
 }

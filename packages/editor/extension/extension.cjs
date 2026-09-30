@@ -85,11 +85,24 @@ async function createBridge(vscode, directory = process.env.AMADEUS_EDITOR_BRIDG
         if (typeof body.path !== 'string' || !path.isAbsolute(body.path)) throw failure('An absolute file path is required.');
         const target = path.resolve(body.path);
         const matches = uri => uri?.scheme === 'file' && path.resolve(uri.fsPath) === target;
-        // "Opened" means the workbench is actually showing this file. Membership in
-        // textDocuments/notebookDocuments is not enough: VS Code keeps a document
-        // alive after its editor tab is closed, so a blank workbench would still
-        // report the file as open. A notebook is shown by a NotebookEditor, for
-        // which activeTextEditor is undefined, so both editor kinds are checked.
+        // "Opened" means the workbench has this file in an editor tab. Read the
+        // tab groups, not just the active editor: when focus moves to the terminal
+        // or another panel, `activeTextEditor` becomes undefined and the old check
+        // reported the file as closed, so the client kept re-opening it and the
+        // editor visibly flickered. Any open tab still counts as open.
+        const groups = vscode.window.tabGroups?.all;
+        if (Array.isArray(groups)) {
+          for (const group of groups) {
+            for (const tab of group.tabs ?? []) {
+              const input = tab?.input;
+              // Plain/diff/custom editors expose the file on `.uri`, `.modified`
+              // or `.original`; any of them counts as shown.
+              if (matches(input?.uri) || matches(input?.modified) || matches(input?.original)) return { opened: true };
+            }
+          }
+          return { opened: false };
+        }
+        // Older API surface (and test doubles): fall back to active editors.
         let opened = false;
         if (vscode.window.activeTextEditor) { try { opened = matches(editorFile(vscode.window.activeTextEditor)); } catch { opened = false; } }
         if (!opened && vscode.window.activeNotebookEditor?.notebook) opened = matches(vscode.window.activeNotebookEditor.notebook.uri);

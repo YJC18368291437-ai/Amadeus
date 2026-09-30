@@ -6,6 +6,7 @@ import os from 'node:os';
 import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { apply } from '../packages/editor/src/index.mjs';
+import { editorKey } from '../packages/editor/src/workspace.mjs';
 import extension from '../packages/editor/extension/extension.cjs';
 
 test('editor host prepares isolated workspaces and forwards validated commands to the real bridge', async t => {
@@ -51,15 +52,17 @@ test('editor host prepares isolated workspaces and forwards validated commands t
   assert.equal((await fetch(`${base}/workspace?session=one`)).status, 400);
   assert.equal((await workspace('missing')).status, 404);
   const ready = await (await workspace()).json();
-  const id = createHash('sha256').update(JSON.stringify(['one', 'pad'])).digest('hex');
+  const canonicalRoot = await fs.realpath(root);
+  const otherRoot = await fs.realpath(other);
+  const id = editorKey(canonicalRoot);
   assert.equal(ready.id, id);
   const workspaceFile = new URL(ready.url, base).searchParams.get('workspace');
-  const canonicalRoot = await fs.realpath(root);
-  assert.deepEqual(JSON.parse(await fs.readFile(workspaceFile, 'utf8')), { folders: [{ path: canonicalRoot }], settings: { 'amadeus.bridgeId': id } });
+  assert.deepEqual(JSON.parse(await fs.readFile(workspaceFile, 'utf8')), { folders: [{ path: canonicalRoot }], settings: { 'amadeus.bridgeId': id, 'workbench.activityBar.location': 'default', 'workbench.sideBar.location': 'right' } });
   const modified = (await fs.stat(workspaceFile)).mtimeMs;
   assert.deepEqual(await (await workspace()).json(), ready);
   assert.equal((await fs.stat(workspaceFile)).mtimeMs, modified);
-  assert.notEqual((await (await workspace('one', 'desktop')).json()).id, id);
+  // Every surface on the same folder shares one workbench; a different folder does not.
+  assert.equal((await (await workspace('one', 'desktop')).json()).id, id);
   assert.notEqual((await (await workspace('two')).json()).id, id);
   assert.equal((await command({ action: 'status' })).status, 503);
 
@@ -68,7 +71,7 @@ test('editor host prepares isolated workspaces and forwards validated commands t
   const editor = { document, selection: { start: { line: 0 }, end: { line: 0 } } };
   const vscode = {
     workspace: {
-      getConfiguration: () => ({ get: () => id }), workspaceFolders: [{ uri: { fsPath: canonicalRoot } }], textDocuments: [document],
+      getConfiguration: () => ({ get: () => id }), workspaceFolders: [{ uri: { fsPath: canonicalRoot } }], textDocuments: [document], notebookDocuments: [],
       openTextDocument: async uri => { calls.push(['open', uri.fsPath]); return document; },
     },
     window: { activeTextEditor: editor, visibleTextEditors: [editor], showTextDocument: async (_document, options) => { calls.push(['show', options]); return editor; }, showErrorMessage() {} },
@@ -103,9 +106,9 @@ test('editor host prepares isolated workspaces and forwards validated commands t
   assert.equal((await command({ action: 'terminal.new' })).status, 400);
   assert.equal((await command('{')).status, 400);
   assert.equal((await command({ action: 'open', path: 'paper.tex', text: 'x'.repeat(66000) })).status, 413);
-  assert.equal((await command({ action: 'status' }, 'one', 'desktop')).status, 503);
+  assert.deepEqual(await (await command({ action: 'status' }, 'one', 'desktop')).json(), { dirty: false });
   assert.equal((await command({ action: 'status' }, 'two')).status, 503);
-  const secondId = createHash('sha256').update(JSON.stringify(['two', 'pad'])).digest('hex');
+  const secondId = editorKey(otherRoot);
   await fs.copyFile(path.join(bridgeDir, `${id}.json`), path.join(bridgeDir, `${secondId}.json`));
   assert.equal((await command({ action: 'status' }, 'two')).status, 503, 'a registration for a different workspace must not be forwarded');
 
