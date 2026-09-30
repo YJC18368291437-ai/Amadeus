@@ -51,6 +51,8 @@ docker compose up -d --build
 
 完整步骤（含 iPad 上安装 Tailscale）见 [docs/guide-wsl-ios.md](docs/guide-wsl-ios.md)。
 
+![WSL + iPad 远程结构](docs/assets/guide-wsl-ios-flow.svg)
+
 ## 能做什么
 
 | 功能 | 说明 |
@@ -61,6 +63,8 @@ docker compose up -d --build
 | 选区注释 | 选中对话、文档或编辑器文本加批注，回答里的引用可点回原文 |
 | 工作区 | 上传 / 下载文件，工作区文件保存在宿主机目录 |
 | 网页浏览器 | 在右侧侧栏打开隔离的 HTTP(S) 网页，和当前工作区并排浏览 |
+
+![界面示例](docs/assets/amadeus-home.png)
 
 ## 开发
 

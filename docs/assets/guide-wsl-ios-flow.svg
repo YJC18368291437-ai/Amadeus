@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="260" viewBox="0 0 900 260" font-family="-apple-system,'Segoe UI',Roboto,'Noto Sans SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <marker id="ah2" markerWidth="10" markerHeight="10" refX="7.5" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#4a7dff"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="900" height="260" fill="#ffffff"/>
+
+  <rect x="20" y="70" width="170" height="90" rx="14" fill="#eef4ff" stroke="#4a7dff" stroke-width="2"/>
+  <text x="105" y="108" text-anchor="middle" font-size="16" font-weight="700" fill="#1b2a4a">iPad / iPhone</text>
+  <text x="105" y="132" text-anchor="middle" font-size="12" fill="#5a6b86">Safari · 装 Tailscale</text>
+
+  <rect x="290" y="70" width="170" height="90" rx="14" fill="#eef4ff" stroke="#4a7dff" stroke-width="2"/>
+  <text x="375" y="108" text-anchor="middle" font-size="16" font-weight="700" fill="#1b2a4a">Windows</text>
+  <text x="375" y="132" text-anchor="middle" font-size="12" fill="#5a6b86">Tailscale + serve</text>
+
+  <rect x="560" y="40" width="320" height="150" rx="16" fill="#f6f9ff" stroke="#9db8ff" stroke-width="2" stroke-dasharray="6 5"/>
+  <text x="720" y="68" text-anchor="middle" font-size="15" font-weight="700" fill="#1b2a4a">WSL2 · Ubuntu</text>
+  <rect x="582" y="82" width="130" height="44" rx="10" fill="#eef4ff" stroke="#4a7dff" stroke-width="2"/>
+  <text x="647" y="101" text-anchor="middle" font-size="13" font-weight="600" fill="#1b2a4a">Amadeus</text>
+  <text x="647" y="117" text-anchor="middle" font-size="11" fill="#5a6b86">:3080</text>
+  <rect x="728" y="82" width="130" height="44" rx="10" fill="#eef4ff" stroke="#4a7dff" stroke-width="2"/>
+  <text x="793" y="101" text-anchor="middle" font-size="13" font-weight="600" fill="#1b2a4a">code-server</text>
+  <text x="793" y="117" text-anchor="middle" font-size="11" fill="#5a6b86">:8080</text>
+  <text x="720" y="160" text-anchor="middle" font-size="11.5" fill="#5a6b86">systemd 开机自启</text>
+
+  <g stroke="#4a7dff" stroke-width="2.5" marker-end="url(#ah2)" fill="none">
+    <line x1="190" y1="115" x2="288" y2="115"/>
+    <line x1="460" y1="115" x2="558" y2="115"/>
+  </g>
+  <text x="239" y="105" text-anchor="middle" font-size="11.5" font-weight="600" fill="#4a7dff">Tailscale 内网 · HTTPS</text>
+  <text x="509" y="105" text-anchor="middle" font-size="11.5" font-weight="600" fill="#4a7dff">转发 127.0.0.1:3080</text>
+
+  <text x="450" y="230" text-anchor="middle" font-size="12" fill="#5a6b86">WSL 的端口会自动映射到 Windows 的 localhost，Tailscale 再把服务暴露给同一账号的设备。</text>
+</svg>
