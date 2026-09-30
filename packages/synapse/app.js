@@ -90,7 +90,6 @@
     focusId: null,         // focused session id, or null
     raw: null,
     didInitialFit: false,  // auto "全览" once, the first time nodes appear
-    demoOverride: null,    // TEMP: when set, render a synthetic demo graph
     colorOverrides: {},    // project name -> hex, picked by the user
     keepIds: null,         // ring to keep after clearing focus (stay in place)
   }
@@ -131,9 +130,6 @@
   aiButton.append(el('span', { text: 'AI 连线' }))
   const layeredButton = el('button', { class: 'graph-button is-layered', type: 'button', title: '分层：项目折成超级点，点开才展开（像 Obsidian 一样动画）' }, actions)
   layeredButton.append(el('span', { text: '分层' }))
-  // TEMP: toggle a synthetic 6×30 demo graph for evaluating scale.
-  const demoButton = el('button', { class: 'graph-button', type: 'button', title: '加载示例数据：6 个项目 × 每个 30 个对话（临时）' }, actions)
-  demoButton.append(el('span', { text: '示例' }))
   const softenButton = el('button', { class: 'graph-button is-soften', type: 'button', title: '连线柔化：交叉处让下层线断开、端点渐隐' }, actions)
   softenButton.append(el('span', { text: '柔化' }))
   const fitButton = el('button', { class: 'graph-button', type: 'button', title: '缩放到全部对话' }, actions)
@@ -202,50 +198,7 @@
     }
   }
 
-  // TEMP demo: open the map as `/synapse/?demo=10x30` to render a synthetic
-  // graph of 10 projects × 30 sessions (exercises the ring's 20-item window).
-  const DEMO = (() => {
-    const match = /[?&]demo=(\d+)x(\d+)/.exec(window.location.search)
-    return match === null ? null : { projects: clamp(Number(match[1]), 1, 40), per: clamp(Number(match[2]), 1, 300) }
-  })()
-  const DEMO_PALETTE = ['#8aa0c4', '#c0908c', '#7fae97', '#a893c2', '#c2a173', '#7babb4', '#c294ac', '#8b93a3', '#98ab72', '#b3896f']
-  const buildDemoPayload = (projects, per) => {
-    const nodes = []
-    const edges = []
-    const list = []
-    const now = Date.now()
-    for (let p = 0; p < projects; p += 1) {
-      const name = `科目 ${p + 1}`
-      const color = DEMO_PALETTE[p % DEMO_PALETTE.length]
-      list.push({ name, color })
-      const ids = []
-      for (let k = 0; k < per; k += 1) {
-        const id = `demo-${p}-${k}`
-        const msgs = 4 + ((p * 31 + k * 7) % 180)
-        ids.push(id)
-        nodes.push({
-          id, sessionId: id, threadId: null, title: `${name} 对话 ${k + 1}`, project: name, color,
-          msgs, size: Math.min(16, 4.5 + Math.sqrt(msgs) * 1.6), questions: [], userCount: 2, assistantCount: 2,
-          lastAt: now - (k * 5 + p) * 3600 * 1000, parentId: null,
-        })
-      }
-      for (let k = 0; k + 1 < per; k += 1) edges.push({ source: ids[k], target: ids[k + 1], kind: 'topic', weight: 0.5 })
-      for (let k = 0; k + 5 < per; k += 7) edges.push({ source: ids[k], target: ids[k + 5], kind: 'fork', weight: 1 })
-    }
-    for (let p = 0; p < projects; p += 1) {
-      edges.push({ source: `demo-${p}-0`, target: `demo-${(p + 3) % projects}-2`, kind: 'ai', weight: 0.85, reason: '同一主题' })
-    }
-    return {
-      nodes, edges, projects: list,
-      meta: { nodeCount: nodes.length, edgeCount: edges.length, source: 'ai', model: 'demo', aiEnabled: true, fingerprint: `demo-${projects}x${per}`, generatedAt: Date.now() },
-    }
-  }
-
   const fetchGraph = async ({ refresh = false } = {}) => {
-    if (state.demoOverride !== null) {
-      applyGraph(buildDemoPayload(state.demoOverride.projects, state.demoOverride.per), { rearrange: refresh })
-      return true
-    }
     try {
       const response = await fetch(refresh ? `${GRAPH_URL}?refresh=1` : GRAPH_URL, { method: refresh ? 'POST' : 'GET' })
       if (!response.ok) throw new Error(String(response.status))
@@ -264,6 +217,7 @@
   const rawById = new Map()
   const RING_MAX = 6
   const RELATED_MAX = RING_MAX - 1
+  const DOT_SCALE = 2 // conversation dots are drawn 2× their base size
 
   const byTimeDesc = list => list.slice().sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0))
   const projectMembers = name => byTimeDesc(state.raw.nodes.filter(node => node.project === name))
@@ -973,7 +927,7 @@
     viewport.setAttribute('transform', `translate(${state.view.x} ${state.view.y}) scale(${k})`)
     for (const node of state.nodes) {
       if (node.group === undefined) continue
-      const r = nodeScreenRadius(node) / k
+      const r = (nodeScreenRadius(node) * (node.isGroup === true ? 1 : DOT_SCALE)) / k
       node.group.setAttribute('transform', `translate(${node.x} ${node.y})`)
       node.dot.setAttribute('r', r.toFixed(2))
       node.dot.setAttribute('fill', node.color)
@@ -992,7 +946,7 @@
     if (state.boxEl !== null) {
       const top = state.byId.get(state.topSlotId)
       if (top !== undefined) {
-        const r = nodeScreenRadius(top) / k
+        const r = (nodeScreenRadius(top) * (top.isGroup === true ? 1 : DOT_SCALE)) / k
         state.boxEl.setAttribute('cx', top.x.toFixed(2))
         state.boxEl.setAttribute('cy', top.y.toFixed(2))
         state.boxEl.setAttribute('r', (r + 6 / k).toFixed(2))
@@ -1701,24 +1655,6 @@
     say(state.layered ? '分层视图：开（项目折成超级点）' : '分层视图：关（显示全部对话）')
   })
 
-  const refreshDemoButton = () => {
-    const on = state.demoOverride !== null
-    demoButton.classList.toggle('is-off', !on)
-    demoButton.querySelector('span').textContent = on ? '退出示例' : '示例'
-  }
-  demoButton.addEventListener('click', () => {
-    const off = state.demoOverride !== null
-    state.demoOverride = off ? null : { projects: 6, per: 30 }
-    state.expanded = null
-    state.focusId = null
-    state.rotation = 0
-    state.keepIds = null
-    state.didInitialFit = false
-    refreshDemoButton()
-    void fetchGraph()
-    say(off ? '已回到真实数据' : '示例数据：6 个项目 × 每个 30 个对话')
-  })
-
   aiButton.addEventListener('click', async () => {
     aiButton.disabled = true
     aiButton.classList.add('is-busy')
@@ -1828,10 +1764,8 @@
       const savedColors = localStorage.getItem(COLOR_KEY)
       if (savedColors !== null) state.colorOverrides = JSON.parse(savedColors) ?? {}
     } catch { /* private mode */ }
-    if (DEMO !== null) state.demoOverride = { projects: DEMO.projects, per: DEMO.per }
     refreshSoftenButton()
     refreshLayeredButton()
-    refreshDemoButton()
     if (window.matchMedia?.('(prefers-color-scheme: dark)').matches === true) {
       state.theme = 'dark'
       document.documentElement.dataset.theme = 'dark'
