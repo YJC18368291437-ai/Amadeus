@@ -12,6 +12,11 @@
   const SVG_NS = 'http://www.w3.org/2000/svg'
   const GRAPH_URL = '/synapse/api/graph'
   const REFRESH_INTERVAL_MS = 30_000
+  // Two clicks within this window count as a double-click. We detect it from
+  // `click` rather than the native `dblclick`, which iPadOS does not reliably
+  // emit for a Bluetooth mouse.
+  const DOUBLE_CLICK_MS = 320
+  let lastNodeClick = { id: null, at: 0 }
 
   // Link softening: a link fades out as it meets a dot, and where two links
   // cross the lower-priority one is broken with a gap so the higher one reads
@@ -46,9 +51,32 @@
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
-  // iPad / touch: tapping the swatch should open the native colour picker.
-  // Mouse desktops (Windows): use the preset palette popover instead.
-  const USE_NATIVE_PICKER = window.matchMedia?.('(pointer: coarse)').matches === true
+  // The map follows the pointer that is actually in use, not the device family:
+  // an iPad with a Bluetooth mouse / trackpad must behave like the desktop, and
+  // a finger keeps the touch behaviour. `pointer: coarse` cannot tell them apart
+  // (iPadOS keeps reporting it while a mouse is attached), so start from "a
+  // fine, hovering pointer exists" and then track the live `pointerType`.
+  const FINE_POINTER_MQ = window.matchMedia?.('(any-hover: hover) and (any-pointer: fine)')
+  let pointerMode = FINE_POINTER_MQ?.matches === true ? 'mouse' : 'touch'
+  const useNativePicker = () => pointerMode !== 'mouse'
+  const applyPointerMode = () => { document.documentElement.dataset.pointer = pointerMode }
+  const setPointerMode = type => {
+    const next = type === 'mouse' || type === 'pen' ? type : 'touch'
+    if (next === pointerMode) return
+    pointerMode = next
+    applyPointerMode()
+    hideTooltip()
+  }
+  document.addEventListener('pointerdown', event => setPointerMode(event.pointerType), true)
+  FINE_POINTER_MQ?.addEventListener?.('change', event => setPointerMode(event.matches ? 'mouse' : 'touch'))
+  applyPointerMode()
+  // The graph is a canvas, not a document: never start a text selection on it.
+  // iPadOS otherwise flashes a grey selection box and cancels the pan gesture.
+  document.addEventListener('selectstart', event => {
+    const target = event.target
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
+    event.preventDefault()
+  })
 
   // ---------------------------------------------------------------- state ----
 
@@ -82,8 +110,9 @@
     // Layered mode ("分层聚合 · 渐进披露"): projects collapse into super nodes.
     // Expanding one lays its sessions on a ring (time order, selectable) around
     // a shrunk super node; clicking a session focuses it and reveals its related
-    // sessions on small rings in other projects. Positions are computed and the
-    // view eases toward them (Obsidian-like motion, not free force).
+    // sessions on small rings in other projects. Target positions are computed
+    // (deterministic ring) and a spring/repulsion sim animates into them, so the
+    // motion reads like Obsidian's force graph but always settles on the ring.
     layered: true,
     expanded: null,        // name of the single expanded project, or null
     rotation: 0,           // which session sits in the top selection slot
@@ -92,6 +121,12 @@
     didInitialFit: false,  // auto "全览" once, the first time nodes appear
     colorOverrides: {},    // project name -> hex, picked by the user
     keepIds: null,         // ring to keep after clearing focus (stay in place)
+    layerHeat: 0,          // repulsion bursts on a layout change, then decays
+    ringPull: 0,           // ring contraction on rotate: 0 = normal, 1 = at the floor
+    ringPullVel: 0,        // spring velocity that eases the contraction back to 0
+    lastRingInputAt: 0,    // when the last rotate input arrived
+    ringFloor: 0,          // hard minimum ring radius (2x the hub's displayed radius)
+    ringBaseRadius: 0,     // the fixed, uncontracted ring radius
   }
 
   // --------------------------------------------------------------- chrome ---
@@ -382,8 +417,16 @@
         for (let i = 0; i < Math.min(RING_MAX, n); i += 1) displayed.push(members[(start + i) % n])
       }
     }
-    const ringRadius = expanded === null ? 0 : Math.max(95, 30 + displayed.length * 17)
-    const anchors = layeredAnchors(expanded, ringRadius)
+    // The ring contracts on rotate (state.ringPull, 0→1) but only down to 3/4 of
+    // the original radius; the 2× hub radius is just a fallback so a dot still
+    // can't overlap the hub when zoomed far out. Other super nodes anchor off the
+    // *base* radius, so only the session ring moves.
+    const baseRingRadius = expanded === null ? 0 : Math.max(95, 30 + displayed.length * 17)
+    const hubScreenRadius = expanded === null ? 0 : baseGroupSize(expanded) * 1.3 * 0.5 * (0.55 + 0.45 * clamp(state.view.k, 0.3, 2.4))
+    const hubGuard = (2 * hubScreenRadius) / Math.max(state.view.k, 0.001)
+    const ringFloor = expanded === null ? 0 : Math.max(baseRingRadius * 0.75, hubGuard)
+    const ringRadius = expanded === null ? 0 : Math.max(ringFloor, baseRingRadius + state.ringPull * (ringFloor - baseRingRadius))
+    const anchors = layeredAnchors(expanded, baseRingRadius)
 
     // Cross-project associations of the focused session (revealed on small rings).
     const associated = new Map()
@@ -420,6 +463,7 @@
           ...node,
           tx: Math.cos(angle) * ringRadius,
           ty: Math.sin(angle) * ringRadius,
+          ringAngle: angle,
           newest: node.id === newestId,
           onRing: true,
           focused: node.id === state.focusId,
@@ -480,7 +524,7 @@
       }
     }
     routeEdges(nodes, edges)
-    return { nodes, edges, ringRadius, hasFocus: focusNode !== null, expanded, topSlotId: displayed[0]?.id ?? null }
+    return { nodes, edges, ringRadius, baseRingRadius, ringFloor, hasFocus: focusNode !== null, expanded, topSlotId: displayed[0]?.id ?? null }
   }
 
   const viewSignature = () => `${state.nodes.map(node => node.id).sort().join(',')}|${state.edges.length}`
@@ -492,14 +536,22 @@
     hideTooltip()
     const previous = new Map(state.nodes.map(node => [node.id, node]))
     const view = state.layered ? computeLayered() : { nodes: state.raw.nodes, edges: state.raw.edges }
+    if (animate) state.layerHeat = 1
     state.ringRadius = view.ringRadius ?? 0
+    state.ringFloor = view.ringFloor ?? 0
+    state.ringBaseRadius = view.baseRingRadius ?? state.ringRadius
     state.hasFocus = view.hasFocus ?? false
     state.topSlotId = view.topSlotId ?? null
     state.nodes = view.nodes.map(node => {
       const color = colorOfProject(node.project)
       const old = previous.get(node.id)
       if (old !== undefined) return { ...node, color, x: old.x, y: old.y, vx: 0, vy: 0, pinned: false }
-      // A brand new node emerges from where its project's super node was.
+      // A new ring dot emerges from just outside the hub (never from inside it);
+      // any other new node from where its project's super node was.
+      if (node.onRing === true && typeof node.ringAngle === 'number') {
+        const r = Math.max(state.ringFloor, 0)
+        return { ...node, color, x: Math.cos(node.ringAngle) * r, y: Math.sin(node.ringAngle) * r, vx: 0, vy: 0, pinned: false }
+      }
       const seed = previous.get(`group:${node.project}`)
       const base = seed !== undefined ? seed : { x: node.tx, y: node.ty }
       return { ...node, color, x: base.x, y: base.y, vx: 0, vy: 0, pinned: false }
@@ -668,41 +720,179 @@
     startLoop()
   }
 
-  /** Ease every node toward its computed target (layered mode). */
-  const easeStep = () => {
-    let moving = false
+  const RING_PULL_GAIN = 0.3
+  const RING_PULL_IDLE_MS = 90
+  const RING_PULL_K = 0.2
+  const RING_PULL_DAMP = 0.72
+
+  /** One rotate input adds a contraction impulse. The gain is applied with an
+   *  ease-out, so the pull slows as it nears the floor and never overshoots it;
+   *  fast repeated input accumulates, slow input decays between notches. */
+  const nudgeRingPull = (gain = RING_PULL_GAIN) => {
+    state.ringPull += gain * (1 - state.ringPull)
+    if (state.ringPull > 1) state.ringPull = 1
+    state.ringPullVel = 0
+    state.lastRingInputAt = performance.now()
+    startLoop()
+  }
+
+  const currentRingRadius = () => {
+    const base = state.ringBaseRadius ?? state.ringRadius ?? 0
+    const floor = state.ringFloor ?? 0
+    return Math.max(floor, base + state.ringPull * (floor - base))
+  }
+
+  /** Put the ring session dots on the (possibly contracted) ring each frame. */
+  const applyRingRadius = () => {
+    if (state.expanded === null) return
+    const radius = currentRingRadius()
     for (const node of state.nodes) {
+      if (node.onRing === true && typeof node.ringAngle === 'number') {
+        node.tx = Math.cos(node.ringAngle) * radius
+        node.ty = Math.sin(node.ringAngle) * radius
+      }
+    }
+  }
+
+  /** After the rotate input stops, spring the contraction back to the normal
+   *  ring: the hard floor and ease-out keep it from ever crossing inward. */
+  const updateRingPull = () => {
+    if (state.ringPull === 0 && state.ringPullVel === 0) return
+    if (performance.now() - state.lastRingInputAt < RING_PULL_IDLE_MS) return
+    state.ringPullVel += -RING_PULL_K * state.ringPull
+    state.ringPullVel *= RING_PULL_DAMP
+    state.ringPull += state.ringPullVel
+    if (state.ringPull > 1) { state.ringPull = 1; if (state.ringPullVel > 0) state.ringPullVel = 0 }
+    if (state.ringPull < -0.18) { state.ringPull = -0.18; if (state.ringPullVel < 0) state.ringPullVel = 0 }
+    if (Math.abs(state.ringPull) < 0.002 && Math.abs(state.ringPullVel) < 0.002) { state.ringPull = 0; state.ringPullVel = 0 }
+  }
+
+  /** Layered motion: spring every node toward its computed target while a
+   *  decaying "heat" drives a short-range repulsion, so expand / collapse blows
+   *  apart with force-graph physics but still settles on the deterministic ring. */
+  const stepLayered = () => {
+    const nodes = state.nodes
+    if (nodes.length === 0) return false
+    for (const node of nodes) { node.fx = 0; node.fy = 0 }
+    if (state.layerHeat > 0.01) {
+      const range = 96
+      for (let i = 0; i < nodes.length; i += 1) {
+        for (let j = i + 1; j < nodes.length; j += 1) {
+          const a = nodes[i]
+          const b = nodes[j]
+          let dx = b.x - a.x
+          let dy = b.y - a.y
+          let dist = Math.hypot(dx, dy)
+          if (dist < 0.001) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dist = Math.hypot(dx, dy) || 0.001 }
+          if (dist >= range) continue
+          const push = (1 - dist / range) * 7 * state.layerHeat
+          const ux = dx / dist
+          const uy = dy / dist
+          a.fx -= ux * push; a.fy -= uy * push
+          b.fx += ux * push; b.fy += uy * push
+        }
+      }
+    }
+    let maxSpeed = 0
+    let maxError = 0
+    for (const node of nodes) {
       const tx = node.tx ?? node.x
       const ty = node.ty ?? node.y
-      const dx = tx - node.x
-      const dy = ty - node.y
-      if (Math.abs(dx) > 0.3 || Math.abs(dy) > 0.3) moving = true
-      node.x += dx * 0.2
-      node.y += dy * 0.2
+      node.fx += (tx - node.x) * 0.09
+      node.fy += (ty - node.y) * 0.09
+      node.vx = (node.vx + node.fx * 0.35) * 0.85
+      node.vy = (node.vy + node.fy * 0.35) * 0.85
+      const speed = Math.hypot(node.vx, node.vy)
+      if (speed > 26) { node.vx = (node.vx / speed) * 26; node.vy = (node.vy / speed) * 26 }
+      node.x += node.vx
+      node.y += node.vy
+      maxSpeed = Math.max(maxSpeed, Math.hypot(node.vx, node.vy))
+      maxError = Math.max(maxError, Math.hypot(tx - node.x, ty - node.y))
+    }
+    // Hard floor: a ring dot may drift inward but never closer to the hub than
+    // twice its displayed radius. Clamping radially (and dropping the inward
+    // velocity) reads as a smooth glide along the floor, not a bounce.
+    const floor = state.expanded === null ? 0 : state.ringFloor
+    if (floor > 0) {
+      for (const node of nodes) {
+        if (node.onRing !== true) continue
+        const dist = Math.hypot(node.x, node.y)
+        if (dist >= floor) continue
+        if (dist < 0.001) {
+          const angle = node.ringAngle ?? -Math.PI / 2
+          node.x = Math.cos(angle) * floor
+          node.y = Math.sin(angle) * floor
+        } else {
+          const scale = floor / dist
+          node.x *= scale
+          node.y *= scale
+        }
+        const ux = node.x / floor
+        const uy = node.y / floor
+        const inward = node.vx * ux + node.vy * uy
+        if (inward < 0) { node.vx -= inward * ux; node.vy -= inward * uy }
+        maxError = Math.max(maxError, Math.hypot((node.tx ?? node.x) - node.x, (node.ty ?? node.y) - node.y))
+      }
+    }
+    state.layerHeat *= 0.94
+    const moving = state.layerHeat > 0.01 || maxSpeed > 0.35 || maxError > 0.5
+    if (!moving) {
+      for (const node of nodes) {
+        node.x = node.tx ?? node.x
+        node.y = node.ty ?? node.y
+        node.vx = 0
+        node.vy = 0
+      }
     }
     return moving
   }
 
+  // The simulation runs on a fixed 60Hz step, decoupled from the display's
+  // refresh rate: a 120/144/165Hz desktop then animates at exactly the same
+  // speed as a 60Hz iPad instead of running proportionally faster.
+  const FRAME_MS = 1000 / 60
   let loopHandle = null
+  let lastFrameAt = 0
+  let frameAcc = 0
   const startLoop = () => {
     if (loopHandle !== null) return
+    lastFrameAt = 0
+    frameAcc = 0
     loopHandle = requestAnimationFrame(tick)
   }
 
   const tick = () => {
     loopHandle = null
-    let moving
-    if (state.layered) {
-      moving = easeStep()
-    } else {
-      step()
-      moving = state.alpha > 0.012
+    const now = performance.now()
+    if (lastFrameAt === 0) lastFrameAt = now - FRAME_MS
+    let elapsed = now - lastFrameAt
+    lastFrameAt = now
+    if (elapsed > 100) elapsed = 100 // the tab was hidden; don't fast-forward
+    frameAcc += elapsed
+    let moving = false
+    let steps = 0
+    while (frameAcc >= FRAME_MS && steps < 6) {
+      frameAcc -= FRAME_MS
+      steps += 1
+      if (state.layered) {
+        updateRingPull()
+        applyRingRadius()
+        const nodeMoving = stepLayered()
+        if (nodeMoving || Math.abs(state.ringPull) > 0.003 || Math.abs(state.ringPullVel) > 0.003) moving = true
+      } else {
+        step()
+        if (state.alpha > 0.012) moving = true
+      }
     }
+    if (steps === 0) { loopHandle = requestAnimationFrame(tick); return }
+    if (steps === 6) frameAcc = 0
     paintPositions()
     if (moving) {
       loopHandle = requestAnimationFrame(tick)
       return
     }
+    lastFrameAt = 0
+    frameAcc = 0
     if (state.fitPending === true) {
       state.fitPending = false
       fit()
@@ -904,13 +1094,19 @@
         if (state.suppressClick === true) { state.suppressClick = false; return }
         if (state.dragMoved === true) { state.dragMoved = false; return }
         event.stopPropagation()
+        // Detect the second click ourselves instead of relying on the native
+        // `dblclick`: iPadOS with a Bluetooth mouse does not always emit it, and
+        // a mouse must behave the same on the iPad as on the desktop.
+        const now = performance.now()
+        const isDouble = lastNodeClick.id === node.id && now - lastNodeClick.at <= DOUBLE_CLICK_MS
+        lastNodeClick = { id: node.id, at: now }
+        if (isDouble) {
+          if (node.isGroup !== true) openSession(node)
+          return
+        }
         if (node.isGroup === true) toggleProject(node.project)
         else if (state.layered) focusSession(node.id)
         else openSession(node)
-      })
-      group.addEventListener('dblclick', event => {
-        event.stopPropagation()
-        if (node.isGroup !== true) openSession(node)
       })
       nodeLayer.appendChild(group)
       node.group = group
@@ -1299,22 +1495,23 @@
       const chip = el('div', { class: 'graph-chip' }, legend)
       chip.dataset.project = project.name
       chip.classList.toggle('is-off', state.hiddenProjects.has(project.name))
-      // Swatch: native picker on touch (iPad), preset palette on mouse desktop.
-      let dot
-      if (USE_NATIVE_PICKER) {
-        dot = el('label', { class: 'graph-chip-dot', title: `给「${project.name}」选颜色` }, chip)
-        dot.style.background = color
-        const input = el('input', { type: 'color', class: 'graph-chip-color' }, dot)
-        input.value = /^#[0-9a-f]{6}$/i.test(color) ? color : '#888888'
-        input.addEventListener('click', event => event.stopPropagation())
-        const onPick = () => { setProjectColor(project.name, input.value); dot.style.background = input.value }
-        input.addEventListener('input', onPick)
-        input.addEventListener('change', onPick)
-      } else {
-        dot = el('button', { class: 'graph-chip-dot', type: 'button', title: `给「${project.name}」选颜色` }, chip)
-        dot.style.background = color
-        dot.addEventListener('click', event => { event.stopPropagation(); openPalette(project.name, dot) })
-      }
+      // The swatch opens the native picker for a finger but the desktop preset
+      // palette for a mouse, decided per click: an iPad with a Bluetooth mouse
+      // then gets the desktop behaviour.
+      const dot = el('label', { class: 'graph-chip-dot', title: `给「${project.name}」选颜色` }, chip)
+      dot.style.background = color
+      const input = el('input', { type: 'color', class: 'graph-chip-color' }, dot)
+      input.value = /^#[0-9a-f]{6}$/i.test(color) ? color : '#888888'
+      input.addEventListener('click', event => event.stopPropagation())
+      const onPick = () => { setProjectColor(project.name, input.value); dot.style.background = input.value }
+      input.addEventListener('input', onPick)
+      input.addEventListener('change', onPick)
+      dot.addEventListener('click', event => {
+        if (useNativePicker()) return
+        event.preventDefault()
+        event.stopPropagation()
+        openPalette(project.name, dot)
+      }, true)
       const toggle = el('button', { class: 'graph-chip-label', type: 'button', title: `只看/隐藏「${project.name}」` }, chip)
       toggle.append(el('span', { class: 'graph-chip-name', text: project.name }))
       toggle.append(el('span', { class: 'graph-chip-count', text: String(count) }))
@@ -1503,13 +1700,51 @@
   svg.addEventListener('touchend', endPinch, { passive: true })
   svg.addEventListener('touchcancel', endPinch, { passive: true })
 
+  // A wheel "notch" is not one size on every device: Windows sends ~100px, while
+  // iPadOS / macOS send single digits and a trackpad streams tiny deltas. Learn
+  // this device's notch from recent events, so one physical notch = one ring
+  // step and the same zoom everywhere. A direction change clears the accumulator
+  // so momentum / a rubber-band tail can never whip the ring backwards.
+  const WHEEL_NOTCH_DEFAULT = 100
+  const WHEEL_NOTCH_MIN = 1
+  const WHEEL_NOTCH_MAX = 240
+  const WHEEL_SAMPLE_MS = 500
+  const ROTATE_COOLDOWN_MS = 80
+  let wheelSamples = []
+  let wheelAccum = 0
+  let lastRotateAt = 0
+  const wheelNotch = () => {
+    const now = performance.now()
+    wheelSamples = wheelSamples.filter(sample => now - sample.at < WHEEL_SAMPLE_MS)
+    let size = 0
+    for (const sample of wheelSamples) if (sample.size > size) size = sample.size
+    return clamp(size > 0 ? size : WHEEL_NOTCH_DEFAULT, WHEEL_NOTCH_MIN, WHEEL_NOTCH_MAX)
+  }
   svg.addEventListener('wheel', event => {
-    // The wheel only zooms; ring rotation is done with the Up/Down arrow keys
-    // (a Magic-Keyboard trackpad's two-finger scroll fires wheel events, and we
-    // don't want it to spin the ring).
     event.preventDefault()
+    // Normalise wheel units to pixels (lines × ~16, pages × ~400).
+    const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * 400 : event.deltaY
+    if (Math.abs(delta) > 0.5) wheelSamples.push({ at: performance.now(), size: Math.abs(delta) })
+    const notch = wheelNotch()
+    // While a project ring is expanded, a plain wheel turns the selection (so a
+    // mouse, or an iPad without a keyboard, can rotate it). Ctrl/Cmd + wheel,
+    // the collapsed overview, and touch-pinch still scale the map.
+    const ringOpen = state.layered && state.expanded !== null && state.focusId === null
+    if (ringOpen && event.ctrlKey !== true && event.metaKey !== true) {
+      if (delta === 0 || Math.sign(delta) !== Math.sign(wheelAccum)) wheelAccum = 0
+      wheelAccum += delta
+      if (Math.abs(wheelAccum) >= notch && performance.now() - lastRotateAt >= ROTATE_COOLDOWN_MS) {
+        rotateSelection(wheelAccum > 0 ? 1 : -1)
+        nudgeRingPull()
+        wheelAccum = 0
+        lastRotateAt = performance.now()
+      }
+      return
+    }
+    wheelAccum = 0
     const point = localPoint(event)
-    const factor = Math.exp((event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY) * -0.0016)
+    // One notch always zooms by the same factor, whatever the raw units are.
+    const factor = Math.exp((delta / notch) * -0.16)
     const nextK = clamp(state.view.k * factor, 0.18, 5)
     const world = screenToWorld(point)
     setView({ k: nextK, x: point.x - world.x * nextK, y: point.y - world.y * nextK })
@@ -1517,9 +1752,14 @@
 
   svg.addEventListener('pointerdown', event => {
     if (pinch !== null) return
-    if (event.target.closest?.('.graph-node') !== null && event.target.closest?.('.graph-node') !== undefined) return
+    const target = event.target.closest?.('.graph-node')
+    if (target !== null && target !== undefined) return
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    // Stop the browser starting a text selection / native drag on the canvas:
+    // on iPadOS that cancels the pointer stream (no panning) and shows a grey box.
+    event.preventDefault()
     state.panning = { startX: event.clientX, startY: event.clientY, viewX: state.view.x, viewY: state.view.y }
-    svg.setPointerCapture(event.pointerId)
+    try { svg.setPointerCapture(event.pointerId) } catch { /* capture unsupported */ }
     svg.classList.add('is-panning')
   })
 
@@ -1527,17 +1767,20 @@
     if (pinch !== null) return
     moveTooltip(event)
     if (state.panning !== null) {
+      event.preventDefault()
       setView({ k: state.view.k, x: state.panning.viewX + (event.clientX - state.panning.startX), y: state.panning.viewY + (event.clientY - state.panning.startY) })
       return
     }
     if (state.dragging !== null) {
-      const world = screenToWorld(localPoint(event))
       const node = state.dragging
+      // Only a real move counts as a drag: pointer jitter during a click must
+      // not mark the node as dragged (which would swallow its click handler).
+      if (node.dragStart !== undefined && Math.hypot(event.clientX - node.dragStart.x, event.clientY - node.dragStart.y) > 4) state.dragMoved = true
+      const world = screenToWorld(localPoint(event))
       node.x = world.x
       node.y = world.y
       node.vx = 0
       node.vy = 0
-      if (Math.abs(event.movementX) + Math.abs(event.movementY) > 0) state.dragMoved = true
       paintPositions()
     }
   })
@@ -1567,6 +1810,7 @@
     node.dragging = true
     node.pinned = false
     state.dragMoved = false
+    node.dragStart = { x: event.clientX, y: event.clientY }
     // Do NOT capture the pointer on the <svg>: capture retargets the follow-up
     // `click` to the svg, so the node's own click handler would never fire (the
     // canvas already covers the whole shell, so moves still reach it regardless).
@@ -1675,6 +1919,7 @@
         if (state.focusId === null) {
           event.preventDefault()
           rotateSelection(event.key === 'ArrowDown' ? 1 : -1)
+          nudgeRingPull()
           return
         }
       }
